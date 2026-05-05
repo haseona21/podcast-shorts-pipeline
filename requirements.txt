@@ -1,0 +1,6 @@
+mediapipe>=0.10.14
+opencv-python>=4.9.0
+numpy>=1.24.0
+captacity>=0.6.0
+openai-whisper>=20231117
+openai>=1.0.0
