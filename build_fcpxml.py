@@ -1,33 +1,34 @@
 #!/usr/bin/env python3
 """Emit a DaVinci-Resolve-importable FCPXML for an episode's approved shorts.
 
-Replaces the hardcoded ffmpeg-cut + Drive-upload step in
-modules/shorts-production.md with a round-trip through Resolve: the user lands
-in DaVinci with the proposed clip splits already on the timeline and can
-swap angles per clip + retrim boundaries before exporting.
+The editor lands in Resolve with the original recording on V1, three alt
+crops (V2 stacked dup, V3 top-solo, V4 bottom-solo) stacked above, and
+markers at every approved short's start/end. They blade and retrim per
+short. The sidecar SRT imports separately via File > Import > Subtitle.
 
 Timeline shape:
-  - Sequence runs source-time aligned (0..source_duration).
-  - Each approved short lives at its resolved [start_s, end_s] as a V1
-    asset-clip; gaps fill the skipped regions.
-  - V1's `ref` = the source from the clip's `## Section Header`.
-  - lane="1" child = the in-pair alternate angle (final-guest <-> final-both,
-    original-guest <-> original-both). Cross-pair angles are *not* auto-added
-    because final/original are nonlinearly offset (final has cuts removed);
-    the assets are still declared in <resources>, so the user can drag them
-    from the media pool if needed.
-  - Subtitles are NOT embedded in the FCPXML. Resolve imports
-    <title lane="-1"> as title overlays on V1, not as a subtitle track.
-    Instead, the user does File > Import > Subtitle on the sibling .srt
-    after importing the FCPXML — Resolve's SRT import lands properly on
-    its own ST (subtitle) track and stays editable.
+  - V1 always references the ORIGINAL recording (preferred: original-both).
+    Final cuts have nonlinear edits removed; using one as primary would put
+    the SRT minutes out of sync with audio. If a final source is provided
+    it lands in <resources> as a draggable alternate but is never primary.
+  - V2 = duplicate stacked layer (compositing scratch).
+  - V3 (lane=2) = top-half crop of V1 → top speaker solo at 1080×1920.
+  - V4 (lane=3) = bottom-half crop of V1 → bottom speaker solo.
+  - All four lanes ship enabled; toggle visibility in the Inspector per
+    clip.
+  - Markers at each approved-short start/end land on V1.
+  - Subtitles are NOT embedded. Use Resolve's File > Import > Subtitle on
+    the sibling .srt after importing the FCPXML.
+
+Final-vs-original tagging of clips is metadata that lives in the shorts
+approved doc only — it tells the editor which moments to look for, not
+which video to switch to. The FCPXML always works off the original.
 
 Usage:
     python scripts/build_fcpxml.py \\
-        --source-final-guest PATH \\
-        --source-final-both PATH \\
-        --source-original-guest PATH \\
         --source-original-both PATH \\
+        [--source-original-guest PATH] \\
+        [--source-final-guest PATH] [--source-final-both PATH] \\
         --srt PATH --json PATH \\
         --approved-md PATH \\
         --slug NAME \\
@@ -189,8 +190,20 @@ def build_xml(
     fcpxml = ET.Element("fcpxml", version="1.10")
     resources = ET.SubElement(fcpxml, "resources")
 
-    # Pick a primary source (V1 reference for the sequence format).
-    primary = next(iter(sources.values()))
+    # Primary V1 reference must be the original (uncut) recording so the
+    # sidecar SRT — which is generated from the same original — actually
+    # aligns with what the editor sees on the timeline. Final cuts have
+    # nonlinear edits removed and would put captions minutes out of sync.
+    primary = next(
+        (sources[k] for k in ("original-both", "original-guest")
+         if k in sources),
+        None,
+    )
+    if primary is None:
+        raise SystemExit(
+            "error: FCPXML must reference the original source. "
+            "Pass --source-original-both or --source-original-guest."
+        )
 
     # Per-asset formats (Resolve handles mixed by per-asset format declarations).
     for src in sources.values():
