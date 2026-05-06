@@ -239,7 +239,9 @@ def build_xml(
     # V2: duplicate full-frame for stacking/compositing experiments
     # V3 (lane=2): top-half crop = top speaker solo
     # V4 (lane=3): bottom-half crop = bottom speaker solo
-    # Disabled by default so V1 shows on import; right-click → Enable to swap.
+    # All four are enabled by default so the editor sees four stacked tracks
+    # and can solo whichever angle they want per clip. Toggle visibility on a
+    # per-clip basis in the Resolve Inspector.
     primary_duration_f = primary.to_frames(primary.duration_s)
     duration_str = primary.encode_frames(primary_duration_f)
 
@@ -255,7 +257,7 @@ def build_xml(
     )
 
     def _add_alt(lane: str, name: str, transform: Optional[dict] = None,
-                 crop: Optional[dict] = None, enabled: bool = False) -> ET.Element:
+                 crop: Optional[dict] = None, enabled: bool = True) -> ET.Element:
         attrs = {
             "name": name,
             "ref": primary.asset_id,
@@ -276,21 +278,19 @@ def build_xml(
         return alt
 
     # V2: duplicate stacked for compositing
-    _add_alt("1", f"V2 stacked dup — {primary.path.stem}", enabled=False)
+    _add_alt("1", f"V2 stacked dup — {primary.path.stem}")
     # V3: top speaker solo. Crop bottom 50% (trim-rect bottom=50), then
     # shift up + scale 2x so the top half fills the 9:16 frame.
     _add_alt(
         "2", f"V3 top solo — top crop",
         crop={"left": 0, "top": 0, "right": 0, "bottom": 50},
         transform={"position": "0 480", "scale": "2 2"},
-        enabled=False,
     )
     # V4: bottom speaker solo. Crop top 50%, shift down + scale 2x.
     _add_alt(
         "3", f"V4 bottom solo — bottom crop",
         crop={"left": 0, "top": 50, "right": 0, "bottom": 0},
         transform={"position": "0 -480", "scale": "2 2"},
-        enabled=False,
     )
 
     for short, start_s, end_s in sorted(shorts_resolved, key=lambda r: r[1]):

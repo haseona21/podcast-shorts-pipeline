@@ -66,10 +66,18 @@ def probe_duration(path: Path) -> float:
 
 
 def extract_audio_chunk(src: Path, start: float, end: float, out: Path) -> None:
+    # -ss / -to AFTER -i forces ffmpeg to decode from frame 0 and stop
+    # at the exact seek point. The fast pre-input seek (-ss before -i)
+    # is keyframe-aligned and drifts by up to a few seconds per chunk,
+    # which compounds across a 6-chunk transcription and makes the SRT
+    # gradually fall out of sync with the audio. Decode-then-seek is
+    # slower but sample-accurate.
     subprocess.run(
         [
-            "ffmpeg", "-y", "-ss", f"{start}", "-to", f"{end}",
-            "-i", str(src), "-vn", "-ac", "1", "-ar", "16000",
+            "ffmpeg", "-y",
+            "-i", str(src),
+            "-ss", f"{start}", "-to", f"{end}",
+            "-vn", "-ac", "1", "-ar", "16000",
             "-c:a", "libmp3lame", "-b:a", "64k", str(out),
         ],
         check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
