@@ -460,8 +460,8 @@ def render_segment(source: Path, seg: Segment, out_path: Path) -> None:
         flag = "-vf"
     cmd = [
         "ffmpeg", "-y", "-loglevel", "error",
-        "-ss", f"{seg.start:.3f}", "-to", f"{seg.end:.3f}",
         "-i", str(source),
+        "-ss", f"{seg.start:.3f}", "-to", f"{seg.end:.3f}",
         flag, flt,
         "-c:v", "libx264", "-preset", "fast", "-crf", "20",
         "-c:a", "aac", "-b:a", "192k",

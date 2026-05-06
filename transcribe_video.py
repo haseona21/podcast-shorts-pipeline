@@ -307,6 +307,26 @@ def main() -> int:
         print("error: OPENAI_API_KEY not set and CAPTACITY_USE_LOCAL_WHISPER is off", file=sys.stderr)
         return 2
 
+    # Cache schema version. Bump when ffmpeg seek behavior, chunk size, or
+    # segment shape changes — old cached transcripts get invalidated automatically.
+    # v2 = post-`-i` seek (sample-accurate). v1 cache is silently ignored.
+    CACHE_VERSION = 2
+    version_file = chunks_dir / "_version"
+    cached_version = None
+    if version_file.exists():
+        try:
+            cached_version = int(version_file.read_text().strip())
+        except ValueError:
+            cached_version = None
+    use_cache = cached_version == CACHE_VERSION
+    if not use_cache and any(chunks_dir.glob("transcript_*.json")):
+        print(
+            f"  [cache] ignoring stale chunks (have v{cached_version}, "
+            f"need v{CACHE_VERSION}) — re-transcribing for sample-accurate SRT",
+            file=sys.stderr,
+        )
+    version_file.write_text(str(CACHE_VERSION))
+
     duration = probe_duration(args.input)
     num_chunks = max(1, math.ceil(duration / CHUNK_SECONDS))
     print(f"Input duration: {duration/60:.1f} min — {num_chunks} chunks")
@@ -318,7 +338,7 @@ def main() -> int:
         end = min(duration, start + CHUNK_SECONDS)
         cache_path = chunks_dir / f"transcript_{i:03d}.json"
 
-        if cache_path.exists() and cache_path.stat().st_size > 0:
+        if use_cache and cache_path.exists() and cache_path.stat().st_size > 0:
             print(f"  [chunk {i:03d}] cached, loading")
             chunk_segments = dicts_to_segments(json.loads(cache_path.read_text()))
         else:

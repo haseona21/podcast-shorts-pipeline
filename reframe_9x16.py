@@ -257,9 +257,12 @@ def reframe_chunk(
     """
     with tempfile.TemporaryDirectory() as td:
         chunk_raw = Path(td) / "raw.mp4"
+        # -ss / -to AFTER -i for sample-accurate cuts. Pre-input -ss is
+        # keyframe-aligned and produces drift between concatenated chunks.
         run([
-            "ffmpeg", "-y", "-ss", f"{start}", "-to", f"{end}",
-            "-i", str(src), "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+            "ffmpeg", "-y", "-i", str(src),
+            "-ss", f"{start}", "-to", f"{end}",
+            "-c:v", "libx264", "-preset", "fast", "-crf", "18",
             "-c:a", "aac", "-b:a", "192k", str(chunk_raw),
         ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
@@ -296,8 +299,8 @@ def reframe_chunk(
             )
             run([
                 "ffmpeg", "-y",
-                "-ss", f"{seg_start}", "-to", f"{seg_end}",
                 "-i", str(chunk_raw),
+                "-ss", f"{seg_start}", "-to", f"{seg_end}",
                 "-vf", vf,
                 "-c:v", "libx264", "-preset", "fast", "-crf", "18",
                 "-c:a", "aac", "-b:a", "192k",
