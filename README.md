@@ -1,6 +1,22 @@
 # podcast-shorts-pipeline
 
-Generic Python tooling for turning long-form 16:9 podcast/interview footage into vertical short-form clips. Three layers — reframe, clip selection / cutting, subtitle generation. CLI-first, no project-specific assumptions; designed to be vendored into a producer-side repo.
+Generic Python tooling for turning long-form 16:9 podcast/interview footage into vertical short-form clips. CLI-first, no project-specific assumptions; designed to be vendored into a producer-side repo.
+
+## Layout
+
+```
+generate_shorts.py          # entrypoint: draft-shorts doc -> finished shorts
+render_short.py             # per-short orchestrator (manifest entry -> mp4)
+config.py                   # shared env-driven config (styling + geometry)
+manifest/make_manifest.py   # draft-shorts doc -> manifest JSON
+splice/reframe.py           # single-pane face-tracked 16:9 -> 9:16
+splice/stack.py             # cut / stacked two-up / concat ffmpeg helpers
+caption/transcribe.py       # cut audio -> word-level Whisper -> words/captions
+caption/burn.py             # burn word-by-word captions onto a video
+examples/draft-shorts.md    # generic sample input doc
+```
+
+A worked example input lives at [`examples/draft-shorts.md`](examples/draft-shorts.md).
 
 ## End-to-end: draft-shorts doc → rendered shorts (`generate_shorts.py`)
 
@@ -19,22 +35,23 @@ It writes the working manifest to `<dir>/manifest.json` and one
 `1080x1920` mp4 per approved short to `<dir>/`. Internally it chains the three
 steps below; run them individually for finer control.
 
-### Step 1 — `make_manifest.py` (doc → manifest)
+### Step 1 — `manifest/make_manifest.py` (doc → manifest)
 
 Parses every `### Approved N: <Title>` section into a manifest entry:
 `id` (slug from title), `title`, `layout`, `render_segments` (parsed from the
 `MM:SS.mmm to MM:SS.mmm` ranges; supports a single `Render segment:` or a
 bulleted `Render segments:` list), and `canonical_output`. `words`/`captions`
-are left empty for step 2. Emits ONE manifest with all approved shorts.
+are left empty for step 2. Emits ONE manifest with all approved shorts. See
+[`examples/draft-shorts.md`](examples/draft-shorts.md) for the input format.
 
 ```
-python make_manifest.py path/to/draft-shorts.md --guest path/to/guest.mp4 [--ali path/to/host.mp4] [--out manifest.json]
+python manifest/make_manifest.py path/to/draft-shorts.md --guest path/to/guest.mp4 [--ali path/to/host.mp4] [--out manifest.json]
 ```
 
 Layout is derived from the `Visual plan:` line: `<guest>-only` / `… only …` →
 `guest_only`; `Both faces` / `stacked` → `stacked`.
 
-### Step 2 — `transcribe_captions.py` (manifest → words + captions)
+### Step 2 — `caption/transcribe.py` (manifest → words + captions)
 
 For each short: cuts + concats its `render_segments` into one audio clip
 (`guest_video` for `guest_only`; the **mixed** Ali+guest tracks via `amix` for
@@ -51,14 +68,12 @@ verbatim words are then grouped into `<=32`-char / `<=7`-word /
 sentence-break caption lines.
 
 ```
-python transcribe_captions.py <manifest.json> [--model small.en]
+python caption/transcribe.py <manifest.json> [--model small.en]
 ```
 
-Whisper backend: the **local `whisper` CLI** by default (no API key needed) —
-resolved from `PATH`, with `--model` selecting the model (default `small.en`).
-Install it with `pip install openai-whisper`. To use the hosted OpenAI Whisper
-API instead, pass `--backend openai` (or set `TRANSCRIBE_BACKEND=openai`); that
-path requires `OPENAI_API_KEY`.
+Whisper backend: the **local `whisper` CLI** (no API key needed) — resolved from
+`PATH`, with `--model` selecting the model (default `small.en`). Install it with
+`pip install openai-whisper`.
 
 ### Step 3 — `render_short.py` (manifest → mp4s)
 
@@ -79,9 +94,9 @@ A manifest is generated from your episode's draft-shorts doc (steps 1–2 above)
 then rendered:
 
 ```
-python make_manifest.py path/to/draft-shorts.md \
+python manifest/make_manifest.py path/to/draft-shorts.md \
     --guest path/to/guest.mp4 --ali path/to/host.mp4 --out manifest.json
-python transcribe_captions.py manifest.json
+python caption/transcribe.py manifest.json
 python render_short.py manifest.json out/
 ```
 
@@ -94,57 +109,42 @@ never be committed.
 - **single** (`guest_only` / `ali_only`): each `render_segment` is cut WITH
   audio (`-c:v libx264 -crf 18 -c:a aac -ar 48000`) from the relevant source
   (`guest_video` for `guest_only`, `ali_video` for `ali_only`), concatenated in
-  order, face-tracked-reframed to 9:16 via `reframe_9x16.py`, then captioned in
+  order, face-tracked-reframed to 9:16 via `splice/reframe.py`, then captioned in
   the **default lower-third** position (`POSITION_Y_PERCENT 0.78`).
 - **stacked** (two-up, Ali top / guest bottom): each `render_segment` pairs both
   sources at the same timecode. Each 16:9 source is **center-cropped to
   1215x1080 (zoomed-out, undistorted — keeps the speaker on-frame) then scaled
   to 1080x960**, and the two panes are `vstack`ed into 1080x1920 with the two
-  audio tracks mixed (`amix … normalize=0`). Segments concat in order, then the
+  audio tracks mixed (`amix … normalize=0`) — the cut/stack/concat ffmpeg logic
+  lives in `splice/stack.py`. Segments concat in order, then the
   clip is captioned with a layout-timeline marking the whole clip `stacked` so
   **captions center on the divider** between the two faces instead of the
   lower-third.
 
 ### Caption look (the winners — do not change)
 
-`caption_video.py` owns the styling and is already tuned to the approved look:
+`caption/burn.py` owns the styling and is already tuned to the approved look:
 Georgia serif, cream `#F5EFE0` text, deep-red `#B11226` moving highlight box,
 stroke = fill (no dark outline), no shadow, `EXTRA_WORD_GAP 0.35`. `render_short.py`
 only chooses the vertical position (lower-third vs divider) via the layout
 timeline; it never touches the styling.
 
-## Layers
+## Modules
 
-### Reframe
-
-| Script | Purpose |
-| --- | --- |
-| `reframe_9x16.py` | Single-camera face-tracked 16:9 → 9:16 reframe with EMA smoothing per scene, scene-cut detection, and chunked resumability. |
-| `reframe_split_9x16.py` | Side-by-side recordings (1920×1080, left/right halves). Speaker-aware: solo runs ≥5s render as a cropped solo; rapid alternation renders as a stacked split. Speaker detection via MediaPipe FaceLandmarker mouth-openness. |
-
-### Shorts clipper
-
-| Script | Purpose |
-| --- | --- |
-| `srt_cut.py` | Word-aligned clip boundary finder. Snaps fuzzy `--start-text` / `--end-text` queries to the closest matching word boundaries in a transcribe.json file. |
-| `approved_shorts.py` | Parser for "approved shorts" markdown docs. Resolves clip titles, source-angle (final/original × guest/both), timestamps, and transcript excerpts into structured `ApprovedShort` records. |
-| `build_fcpxml.py` | Emits a DaVinci Resolve / FCPX-compatible FCPXML with primary stacked layout + alt video lanes for solo crops, plus markers at every approved-clip boundary. |
-| `import_fcpxml.py` | Re-cuts shorts from a DaVinci-edited FCPXML, preserving any marker tweaks the editor made. |
-| `audit_fcpxml.py` | Validates FCPXML round-trip integrity (timeline frames, markers, asset references). |
-
-### Subtitling
-
-| Script | Purpose |
-| --- | --- |
-| `transcribe_video.py` | Whisper transcription producing both human-editable SRT and Captacity-compatible word-level JSON. Chunks at 10-min boundaries, resumable. Supports `--initial-prompt` for proper-noun biasing. |
-| `caption_video.py` | Burns word-by-word captions onto a reframed video via Captacity. |
-| `reconcile_and_caption.py` | Reconciles edits made to the SRT file back into the word-level JSON before caption burning. |
+| Concern | Module | Purpose |
+| --- | --- | --- |
+| manifest | `manifest/make_manifest.py` | Parse a draft-shorts doc into a render manifest (sources, layout, segments, slug). |
+| splice | `splice/reframe.py` | Single-camera face-tracked 16:9 → 9:16 reframe with per-scene EMA smoothing, scene-cut detection, and chunked resumability. |
+| splice | `splice/stack.py` | Cut/concat helpers + the stacked two-up (top/bottom, undistorted, audio-mixed) ffmpeg filter used by `render_short.py`. |
+| caption | `caption/transcribe.py` | Cut each short's audio, run word-level local Whisper, and write verbatim `words` + grouped `captions` into the manifest. |
+| caption | `caption/burn.py` | Burn word-by-word captions onto a video via a forked Captacity (vertical-position aware). |
 
 ## Requirements
 
 - Python 3.10+
-- `mediapipe`, `opencv-python`, `numpy`, `captacity`, `openai-whisper` (or OpenAI API for hosted Whisper)
+- `mediapipe`, `opencv-python`, `numpy`, `captacity`, `openai-whisper`
 - `ffmpeg` and `ffprobe` on `PATH`
+- the local `whisper` CLI on `PATH` (from `openai-whisper`)
 
 ```
 pip install -r requirements.txt
@@ -188,7 +188,7 @@ A real shell `export` always wins over a value in `.env`. The real `.env` is
 | `SHORTS_MAX_CHARS` | `32` | `group_words` max chars per caption line |
 | `SHORTS_PADDING` | `80` | Horizontal text bbox padding (px) |
 | `SHORTS_LINE_COUNT` | `1` | Captacity line_count for fit calc |
-| `SHORTS_MAX_WORDS_PER_CAPTION` | `5` | Max words visible at once (caption_video.py) |
+| `SHORTS_MAX_WORDS_PER_CAPTION` | `5` | Max words visible at once (caption/burn.py) |
 | `SHORTS_WIDTH` | `1080` | Final frame width |
 | `SHORTS_HEIGHT` | `1920` | Final frame height |
 | `SHORTS_FPS` | `24` | Output frame rate |
