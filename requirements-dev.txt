@@ -1,0 +1,2 @@
+# Dev/test dependencies (pure-Python; no ffmpeg/whisper/moviepy needed).
+pytest>=8.0
