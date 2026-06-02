@@ -1,0 +1,18 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.DS_Store
+*.mp4
+*.mov
+*.part
+*_chunks/
+*.wav
+*.mp3
+*.srt
+*.fcpxml
+# Generated manifests embed real source paths + clip transcripts — never commit.
+manifests/
+# Real local config — never commit. The committed template is .env.example.
+.env
