@@ -1,15 +1,13 @@
 #!/usr/bin/env python3
-"""Burn word-by-word captions into a video using a pre-computed segments JSON.
+"""Burn word-by-word captions into a video from a segments JSON.
 
-The segments JSON is produced by caption/transcribe.py (a list of segments with
-word-level start/end timings). We use a forked copy of Captacity's
-add_captions() so we can control vertical position — Captacity 0.3.1 hardcodes
-captions to vertical center, which collides with YouTube Shorts' bottom UI.
+The segments JSON comes from caption/transcribe.py (segments with word-level
+timings). We fork Captacity's add_captions() to control vertical position —
+upstream hardcodes vertical center, which collides with the Shorts bottom UI.
 
-Usage:
     python caption/burn.py input.mp4 segments.json output.mp4
 
-Brand styling is env-driven via config.py — see CFG.caption.
+Styling is env-driven via config.py (CFG.caption).
 """
 
 from __future__ import annotations
@@ -23,51 +21,39 @@ import time
 from pathlib import Path
 
 
-# ---- Brand styling --------------------------------------------------------
-# These specs are now driven by environment variables (optionally via a repo-
-# root .env file); see config.py. The defaults in config.py equal the values
-# that used to be hardcoded here, so with no .env the output is unchanged.
-# The module-level names below are kept (sourced from CFG) so the rest of this
-# file — including the closure that reads EXTRA_WORD_GAP — is untouched.
-# Make the repo root importable so `config` resolves no matter the CWD.
+# ---- Styling (env-driven via config.py) -----------------------------------
+# Make the repo root importable so `config` resolves regardless of CWD.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from config import CFG  # noqa: E402
+from config import CFG, resolve_font  # noqa: E402
 
 _C = CFG.caption
 
-# SERIF font (Georgia regular ships on macOS). A plain .ttf is the most reliable
-# path through moviepy/ImageMagick TextClip.
 FONT = _C.font
 FONT_SIZE = _C.font_size
-# cream (not pure white) for a warmer look.
 FONT_COLOR = _C.text_color
 STROKE_WIDTH = _C.stroke_width
-# stroke matches the fill (cream) so the glyphs have NO dark outline.
-STROKE_COLOR = _C.stroke_color
+STROKE_COLOR = _C.stroke_color  # = fill by default, so glyphs have no outline
 
-# Active-word highlight: WHITE glyph on a solid RED box that moves word-by-word.
+# Active word: white glyph on a solid colored box that moves word-by-word.
 HIGHLIGHT_CURRENT_WORD = True
-WORD_HIGHLIGHT_COLOR = _C.highlight_color  # crimson box behind the active word
+WORD_HIGHLIGHT_COLOR = _C.highlight_color
 
 LINE_COUNT = _C.line_count
 PADDING = _C.padding
 
-# Extra inter-word breathing room, as a fraction of a space's advance, applied
-# identically to the rendered glyph layout (forked create_composite_text) AND to
-# the red highlight-box geometry, so the box stays aligned with the active word.
+# Extra inter-word gap (fraction of a space advance), applied identically to the
+# glyph layout and the highlight-box geometry so the box stays word-aligned.
 EXTRA_WORD_GAP = _C.word_gap
 
-# Max words visible at once. Captacity splits when fit_function returns False.
+# Max words visible at once (Captacity splits when fit_function returns False).
 MAX_WORDS_PER_CAPTION = _C.max_words_per_caption
 
-# No shadow at all (strength/blur 0 -> no shadow clip composited).
-SHADOW_STRENGTH = _C.shadow_strength
+SHADOW_STRENGTH = _C.shadow_strength  # 0 = no shadow clip composited
 SHADOW_BLUR = _C.shadow_blur
 
-# Vertical position of the caption block's CENTER as a fraction of video height.
-# 0.78 leaves room below for YouTube Shorts' UI overlay.
+# Caption block center as a fraction of video height. 0.78 = lower-third (clears
+# the Shorts UI); stack uses 0.5 (between the two faces).
 POSITION_Y_PERCENT = _C.position_y
-# Vertical center used for "stacked" captions (between the two faces).
 STACK_POSITION_Y_PERCENT = _C.stack_position_y
 # ------------------------------------------------------------------------------
 
@@ -209,9 +195,8 @@ def add_captions_custom(
     from PIL import ImageFont as _PILImageFont  # type: ignore
     from moviepy.editor import CompositeVideoClip as _CompositeVideoClip  # type: ignore
 
-    # CUSTOM: fork create_composite_text to add EXTRA_WORD_GAP after each space
-    # so words render with more breathing room. Mirrors upstream layout math
-    # exactly except for the extra advance applied when a clip is a space.
+    # Fork create_composite_text to add EXTRA_WORD_GAP after each space. Mirrors
+    # upstream layout math except for that extra advance on space clips.
     def _create_composite_text_wide(text_clips, cfont, cfont_size):
         pf = _PILImageFont.truetype(cfont, cfont_size)
         scale_factor = 3.012
@@ -293,10 +278,9 @@ def add_captions_custom(
                 cap["text"], font, font_size, stroke_width, text_bbox_width,
             )
 
-            # CUSTOM: anchor block center at POSITION_Y_PERCENT instead of 0.5.
-            # If a layout_timeline is provided and this caption's time falls in
-            # a "stacked" segment, position at stacked_y_percent (vertical
-            # center, between the two faces) instead.
+            # Anchor block center at position_y_percent (not 0.5). If a
+            # layout_timeline marks this caption's time as "stacked", use
+            # stacked_y_percent (between the two faces) instead.
             active_y = position_y_percent
             if layout_timeline:
                 ct = cap["start"]
@@ -312,40 +296,30 @@ def add_captions_custom(
             for line in line_data["lines"]:
                 pos = ("center", text_y_offset)
                 words = line["text"].split()
-                # CUSTOM: line-local index of the active (currently-spoken)
-                # word. `current_index` is the active word's position within the
-                # whole caption; `index` is how many words preceded this line.
+                # Active word's index within this line (current_index is its
+                # index in the whole caption; index = words before this line).
                 line_active_index = current_index - index
-                word_list = []
-                # CUSTOM: keep ALL glyphs white. The active word is highlighted
-                # by a red box composited *behind* it (added below), not by
-                # recoloring the glyph. This yields white-text-on-red-box.
-                for w in words:
-                    word_obj = Word(w)
-                    word_list.append(word_obj)
+                # All glyphs stay white; the active word is highlighted by a
+                # colored box composited behind it (below), not by recoloring.
+                word_list = [Word(w) for w in words]
 
-                # CUSTOM: build a moving RED highlight box behind the active
-                # word. We reproduce captacity.create_composite_text's layout
-                # math: the composite (full_width wide) is centered on screen,
-                # and word N starts at sum(font.getlength(prior)*scale_factor).
-                # We size/place a red ColorClip at that word's box and add it to
-                # `clips` BEFORE the text clip so the white glyph sits on top.
+                # Build the moving highlight box behind the active word,
+                # reproducing create_composite_text's layout math so it aligns:
+                # the full_width composite is screen-centered and word N starts
+                # at sum(getlength(prior)*scale). Added before the text clip.
                 if highlight_current_word and 0 <= line_active_index < len(words):
                     from PIL import ImageFont as _ImageFont
                     from moviepy.editor import ColorClip as _ColorClip
                     _scale = 3.012  # matches create_composite_text
                     _pf = _ImageFont.truetype(font, font_size // 3)
-                    # CUSTOM: same extra inter-word advance the forked
-                    # create_composite_text applies, so the box stays aligned.
+                    # Same extra inter-word advance the forked layout applies.
                     _extra_gap = _pf.getlength(" ") * _scale * EXTRA_WORD_GAP
 
-                    # Full composite width = sum of all words+trailing-space
-                    # advances except the last word, plus the last word's
-                    # actual rendered size (mirrors create_composite_text where
-                    # the final clip contributes its true size, not getlength).
-                    line_text = line["text"]
+                    # Full composite width: each word + trailing-space advance,
+                    # except the last word contributes its true rendered size
+                    # (mirrors create_composite_text).
                     full_width = 0.0
-                    cum = []  # cumulative left-x advance per word (incl leading)
+                    cum = []  # cumulative left-x advance per word
                     running = 0.0
                     for wi, w in enumerate(words):
                         cum.append(running)
@@ -470,13 +444,13 @@ def main() -> int:
         return 2
 
     try:
-        import captacity  # type: ignore
+        import captacity  # type: ignore  # noqa: F401
     except ImportError:
         print("error: captacity not installed. Run: pip install captacity", file=sys.stderr)
         return 2
 
     try:
-        resolved_font = captacity.get_font_path(FONT)
+        resolved_font = resolve_font(FONT)
     except FileNotFoundError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2

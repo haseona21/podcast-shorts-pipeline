@@ -1,24 +1,13 @@
 #!/usr/bin/env python3
-"""Centralized, env-var-driven configuration for the shorts pipeline.
+"""Env-driven config for the shorts pipeline (caption styling + render geometry).
 
-The production "specs" — caption styling and render geometry — used to live as
-hardcoded literals inside ``caption_video.py``, ``render_short.py``, and
-``transcribe_captions.py``. They now live here, driven by environment variables
-that can optionally be supplied via a ``.env`` file in the repo root.
-
-Design constraints:
-  * **Defaults equal the current winning values.** With NO ``.env`` file and no
-    env vars set, every value below equals the literal it replaced, so output
-    is byte-for-byte identical to before this change.
-  * **No third-party dependency.** We ship a tiny ``KEY=VALUE`` parser instead
-    of pulling in python-dotenv. The parser never overwrites a variable that is
-    already present in ``os.environ`` (so a real shell export wins over .env).
-
-Usage::
+Values come from environment variables, optionally supplied via a ``.env`` file
+in the repo root. A shell export always wins over ``.env``. The ``.env`` parser
+is a tiny ``KEY=VALUE`` reader so there's no python-dotenv dependency.
 
     from config import CFG
-    CFG.caption.font          # caption styling
-    CFG.render.width          # render geometry
+    CFG.caption.font     # caption styling
+    CFG.render.width     # render geometry
 """
 
 from __future__ import annotations
@@ -30,6 +19,10 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent
 DEFAULT_ENV_PATH = REPO_ROOT / ".env"
 
+# Bundled SIL OFL serif (EB Garamond), so captions work out-of-the-box on any
+# OS. Override with SHORTS_FONT. See fonts/README.md.
+DEFAULT_FONT = "fonts/EBGaramond-Regular.ttf"
+
 
 # ---------------------------------------------------------------------------
 # .env loading (dependency-free)
@@ -38,11 +31,9 @@ DEFAULT_ENV_PATH = REPO_ROOT / ".env"
 def load_dotenv(path: Path = DEFAULT_ENV_PATH) -> None:
     """Load ``KEY=VALUE`` lines from ``path`` into ``os.environ``.
 
-    * Blank lines and lines whose first non-space char is ``#`` are ignored.
-    * A leading ``export `` prefix is tolerated.
-    * Surrounding single/double quotes around the value are stripped.
-    * Does NOT overwrite a key already present in ``os.environ`` (a real shell
-      export wins). Missing file is a silent no-op.
+    Ignores blanks and ``#`` comments, tolerates a leading ``export``, strips
+    surrounding quotes, and never overwrites a key already in ``os.environ`` (a
+    shell export wins). Missing file is a no-op.
     """
     if not path.exists():
         return
@@ -59,10 +50,9 @@ def load_dotenv(path: Path = DEFAULT_ENV_PATH) -> None:
         if not key:
             continue
         val = val.strip()
-        # strip a trailing inline comment only if the value is unquoted
+        # Strip a trailing inline comment, but keep a '#' that's part of a color
+        # literal like #B11226 — only ' #' (space then hash) is a comment.
         if val[:1] not in ("'", '"'):
-            # keep '#' that is part of a color literal like #B11226 — only treat
-            # ' #' (space then hash) as a comment delimiter.
             hash_at = val.find(" #")
             if hash_at != -1:
                 val = val[:hash_at].rstrip()
@@ -96,6 +86,31 @@ def _get_float(name: str, default: float) -> float:
 
 
 # ---------------------------------------------------------------------------
+# font resolution
+# ---------------------------------------------------------------------------
+
+def resolve_font(font: str = "") -> str:
+    """Resolve the caption font to an existing .ttf/.ttc path.
+
+    Accepts an absolute path or a path relative to the repo root. Falls back to
+    SHORTS_FONT / the bundled default. Raises FileNotFoundError with a friendly
+    message if nothing resolves, so callers don't crash cryptically deep in PIL.
+    """
+    candidate = font or _get_str("SHORTS_FONT", DEFAULT_FONT)
+    p = Path(candidate)
+    tries = [p] if p.is_absolute() else [p, REPO_ROOT / p]
+    for t in tries:
+        if t.exists():
+            return str(t)
+    raise FileNotFoundError(
+        f"Caption font not found: {candidate!r}.\n"
+        f"Set SHORTS_FONT to a .ttf/.ttc file, e.g. "
+        f"SHORTS_FONT=fonts/YourFont.ttf, or drop a font into the fonts/ "
+        f"directory. A bundled default ({DEFAULT_FONT}) ships with the repo."
+    )
+
+
+# ---------------------------------------------------------------------------
 # config schema (defaults == current hardcoded values)
 # ---------------------------------------------------------------------------
 
@@ -116,8 +131,8 @@ class CaptionConfig:
     max_chars: int
     padding: int
     line_count: int
-    # caption_video.py's own "max words visible at once" knob (distinct from the
-    # group_words per-line cap); kept env-driven so output stays identical.
+    # "max words visible at once" in caption/burn.py (distinct from the
+    # group_words per-line cap).
     max_words_per_caption: int
 
 
@@ -145,7 +160,7 @@ def load_config() -> Config:
 
     text_color = _get_str("SHORTS_TEXT_COLOR", "#F5EFE0")
     caption = CaptionConfig(
-        font=_get_str("SHORTS_FONT", "/System/Library/Fonts/Supplemental/Georgia.ttf"),
+        font=_get_str("SHORTS_FONT", DEFAULT_FONT),
         font_size=_get_int("SHORTS_FONT_SIZE", 64),
         text_color=text_color,
         # stroke defaults to the text color (no dark outline)

@@ -13,7 +13,9 @@ splice/reframe.py           # single-pane face-tracked 16:9 -> 9:16
 splice/stack.py             # cut / stacked two-up / concat ffmpeg helpers
 caption/transcribe.py       # cut audio -> word-level Whisper -> words/captions
 caption/burn.py             # burn word-by-word captions onto a video
+fonts/                      # caption fonts (bundled OFL default + your own)
 examples/draft-shorts.md    # generic sample input doc
+tests/                      # unit tests for the pure logic (pytest)
 ```
 
 A worked example input lives at [`examples/draft-shorts.md`](examples/draft-shorts.md).
@@ -121,13 +123,30 @@ never be committed.
   **captions center on the divider** between the two faces instead of the
   lower-third.
 
-### Caption look (the winners — do not change)
+### Caption look
 
-`caption/burn.py` owns the styling and is already tuned to the approved look:
-Georgia serif, cream `#F5EFE0` text, deep-red `#B11226` moving highlight box,
-stroke = fill (no dark outline), no shadow, `EXTRA_WORD_GAP 0.35`. `render_short.py`
-only chooses the vertical position (lower-third vs divider) via the layout
-timeline; it never touches the styling.
+`caption/burn.py` owns the styling: serif font, cream `#F5EFE0` text, deep-red
+`#B11226` moving highlight box, stroke = fill (no dark outline), no shadow,
+`SHORTS_WORD_GAP 0.35`. `render_short.py` only chooses the vertical position
+(lower-third vs divider) via the layout timeline; it never touches the styling.
+
+### Using your own font
+
+Captions render with the font at `SHORTS_FONT`. The repo bundles
+[EB Garamond](fonts/EBGaramond-Regular.ttf) (SIL OFL — see
+[`fonts/OFL.txt`](fonts/OFL.txt)) as the cross-platform default, so it works
+out-of-the-box on any OS with no system fonts assumed.
+
+To use a different font, drop a `.ttf`/`.ttc` into [`fonts/`](fonts/) and point
+`SHORTS_FONT` at it (absolute or repo-relative):
+
+```
+SHORTS_FONT=fonts/YourFont.ttf python generate_shorts.py ...
+```
+
+If the configured font file doesn't exist, the pipeline fails with a clear
+message telling you to fix `SHORTS_FONT`, rather than crashing deep in the
+rendering stack.
 
 ## Modules
 
@@ -152,6 +171,16 @@ pip install -r requirements.txt
 
 The MediaPipe FaceLandmarker model is auto-downloaded on first run and cached.
 
+### Tests
+
+The pure parsing/cleaning/config logic has unit tests (no ffmpeg/whisper/moviepy
+needed):
+
+```
+pip install -r requirements-dev.txt
+python -m pytest -q
+```
+
 ## Configuration (.env)
 
 The production "specs" — caption styling and render geometry — are driven by
@@ -173,7 +202,7 @@ A real shell `export` always wins over a value in `.env`. The real `.env` is
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `SHORTS_FONT` | `/System/Library/Fonts/Supplemental/Georgia.ttf` | Caption font (.ttf path) |
+| `SHORTS_FONT` | `fonts/EBGaramond-Regular.ttf` | Caption font (.ttf/.ttc; absolute or repo-relative) |
 | `SHORTS_FONT_SIZE` | `64` | Caption glyph size (px) |
 | `SHORTS_TEXT_COLOR` | `#F5EFE0` | Cream fill color |
 | `SHORTS_STROKE_COLOR` | = text color | Stroke color (no dark outline) |
