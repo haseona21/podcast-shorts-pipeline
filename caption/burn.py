@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """Burn word-by-word captions into a video using a pre-computed segments JSON.
 
-The segments JSON should come from scripts/transcribe_video.py (it writes a
-.json sidecar alongside the .srt). We use a forked copy of Captacity's
+The segments JSON is produced by caption/transcribe.py (a list of segments with
+word-level start/end timings). We use a forked copy of Captacity's
 add_captions() so we can control vertical position — Captacity 0.3.1 hardcodes
 captions to vertical center, which collides with YouTube Shorts' bottom UI.
 
 Usage:
-    python scripts/caption_video.py input.mp4 segments.json output.mp4
+    python caption/burn.py input.mp4 segments.json output.mp4
 
-Brand styling is hardcoded below — edit constants to tune the look.
+Brand styling is env-driven via config.py — see CFG.caption.
 """
 
 from __future__ import annotations
@@ -29,6 +29,8 @@ from pathlib import Path
 # that used to be hardcoded here, so with no .env the output is unchanged.
 # The module-level names below are kept (sourced from CFG) so the rest of this
 # file — including the closure that reads EXTRA_WORD_GAP — is untouched.
+# Make the repo root importable so `config` resolves no matter the CWD.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from config import CFG  # noqa: E402
 
 _C = CFG.caption
@@ -434,7 +436,7 @@ def add_captions_custom(
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("input", type=Path, help="Input video (mp4)")
-    parser.add_argument("segments", type=Path, help="Segments JSON from transcribe_video.py")
+    parser.add_argument("segments", type=Path, help="Segments JSON (word-level timings)")
     parser.add_argument("output", type=Path, help="Captioned output video")
     parser.add_argument(
         "--break-points", default="",

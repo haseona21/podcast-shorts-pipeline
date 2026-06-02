@@ -7,7 +7,7 @@ layout, render segments, and slug/title. The `words` and `captions` fields are
 left empty — they are filled in by `transcribe_captions.py`, which transcribes
 the actual cut audio.
 
-    python make_manifest.py <draft_shorts.md> \\
+    python manifest/make_manifest.py <draft_shorts.md> \\
         --guest <guest_video.mp4> [--ali <ali_video.mp4>] [--out manifest.json]
 
 Doc structure parsed (the per-episode shorts plan):

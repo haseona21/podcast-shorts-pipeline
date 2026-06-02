@@ -5,7 +5,7 @@ Scene-aware (resets tracker at cuts), chunked (≤10 min, resumable), and safe t
 re-run after a crash — completed chunks are skipped.
 
 Usage:
-    python scripts/reframe_9x16.py input.mp4 output.mp4 [--chunks-dir DIR]
+    python splice/reframe.py input.mp4 output.mp4 [--chunks-dir DIR]
 
 If --chunks-dir is omitted, a sibling directory next to the output (with suffix
 "_chunks") is used so repeat runs resume naturally.

@@ -19,24 +19,17 @@ For every approved short in a manifest this:
      sentence break) and writes `words` + `captions` back into the manifest
      in place.
 
-    python transcribe_captions.py <manifest.json> [--model small.en]
+    python caption/transcribe.py <manifest.json> [--model small.en]
 
-Whisper backend:
-  - Default: LOCAL `whisper` CLI (openai-whisper) resolved from PATH. Needs NO
-    API key. `--model` sets the local model name (default small.en).
-    Install: `pip install openai-whisper`.
-  - Optional: OpenAI hosted Whisper (`whisper-1`) via `--backend openai` (or
-    TRANSCRIBE_BACKEND=openai); requires OPENAI_API_KEY.
-
-Reuses the transcription engine in transcribe_video.py (same repo) for the
-optional hosted-API path only.
+Whisper backend: the LOCAL `whisper` CLI (openai-whisper) resolved from PATH.
+Needs NO API key. `--model` sets the local model name (default small.en).
+Install: `pip install openai-whisper`.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-import os
 import shutil
 import subprocess
 import sys
@@ -44,7 +37,9 @@ import tempfile
 from pathlib import Path
 from typing import Dict, List
 
-from config import CFG
+# Make the repo root importable so `config` resolves no matter the CWD.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from config import CFG  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parent
 
@@ -309,26 +304,11 @@ def _transcribe_local_cli(audio: Path, model: str) -> List[Dict]:
     return words
 
 
-def transcribe_clip(audio: Path, model: str, backend: str) -> List[Dict]:
-    """Word-level transcription of a clip -> [{"word","start","end"}, ...]."""
-    if backend == "openai":
-        if not os.getenv("OPENAI_API_KEY"):
-            raise SystemExit(
-                "error: --backend openai requires OPENAI_API_KEY to be set"
-            )
-        import transcribe_video as tv  # lazy: only the hosted-API path needs it
-        segments = tv.transcribe_api(audio, "")
-        words: List[Dict] = []
-        for seg in segments:
-            for w in seg.words:
-                words.append({
-                    "word": w.word.strip(),
-                    "start": float(w.start),
-                    "end": float(w.end),
-                })
-        return words
+def transcribe_clip(audio: Path, model: str) -> List[Dict]:
+    """Word-level transcription of a clip -> [{"word","start","end"}, ...].
 
-    # Default: local whisper CLI (no API key needed).
+    Uses the local whisper CLI (no API key needed).
+    """
     return _transcribe_local_cli(audio, model)
 
 
@@ -338,12 +318,6 @@ def main() -> int:
     ap.add_argument("manifest", type=Path)
     ap.add_argument("--model", default="small.en",
                     help="Local whisper model name. Default small.en.")
-    ap.add_argument("--backend",
-                    choices=["local", "openai"],
-                    default=os.getenv("TRANSCRIBE_BACKEND", "local"),
-                    help="Transcription backend. 'local' (default) shells out "
-                         "to the `whisper` CLI on PATH (no API key). 'openai' "
-                         "uses the hosted Whisper API (needs OPENAI_API_KEY).")
     args = ap.parse_args()
 
     if not args.manifest.exists():
@@ -360,7 +334,7 @@ def main() -> int:
         with tempfile.TemporaryDirectory(prefix="transcribe_caps_") as td:
             workdir = Path(td)
             audio = build_clip_audio(short, sources, workdir)
-            raw_words = transcribe_clip(audio, args.model, args.backend)
+            raw_words = transcribe_clip(audio, args.model)
 
         cleaned = clean_words(raw_words)
         captions = group_words(cleaned)

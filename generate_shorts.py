@@ -2,9 +2,9 @@
 """Draft-shorts doc -> finished vertical shorts (single command).
 
 Chains the full pipeline:
-    make_manifest.py       parse the draft doc into a manifest
-    transcribe_captions.py transcribe each cut + write words/captions
-    render_short.py        cut -> reframe/stack -> burn captions
+    manifest/make_manifest.py  parse the draft doc into a manifest
+    caption/transcribe.py      transcribe each cut + write words/captions
+    render_short.py            cut -> reframe/stack -> burn captions
 
     python generate_shorts.py path/to/draft-shorts.md \\
         --guest path/to/guest.mp4 --ali path/to/host.mp4 --out out/ \\
@@ -50,11 +50,11 @@ def main() -> int:
     py = sys.executable
 
     step("1/3 make_manifest", [
-        py, str(REPO_ROOT / "make_manifest.py"), str(args.draft_shorts),
+        py, str(REPO_ROOT / "manifest" / "make_manifest.py"), str(args.draft_shorts),
         "--guest", args.guest, "--ali", args.ali, "--out", str(manifest),
     ])
     step("2/3 transcribe_captions", [
-        py, str(REPO_ROOT / "transcribe_captions.py"), str(manifest),
+        py, str(REPO_ROOT / "caption" / "transcribe.py"), str(manifest),
         "--model", args.model,
     ])
     step("3/3 render_short", [
