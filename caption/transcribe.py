@@ -1,29 +1,18 @@
 #!/usr/bin/env python3
 """Transcribe each short's cut audio and write clip-local words + captions.
 
-For every approved short in a manifest this:
-  1. Cuts + concats the short's `render_segments` into one audio clip.
-     - guest_only / ali_only: audio from the single relevant source.
-     - stacked: BOTH sources mixed (amix) — these are dialogue, so we want
-       both speakers in the transcript.
-  2. Runs word-level Whisper on the clip audio (clip-local timings, t=0 at the
-     start of the cut).
-  3. Cleans the words VERBATIM. Captions transcribe everything actually said,
-     including dillydallying (filler words, hesitations, false starts,
-     repeated words, "well", "I think", "I'll take a step back"). Do NOT drop
-     or smooth them. The ONLY transforms allowed are: fix obvious
-     mistranscriptions via a small map (`super cycle`->`supercycle`,
-     `seeding`->`ceding`) and capitalize sentence starts. Word timings stay
-     exactly as Whisper produced them.
-  4. Groups the cleaned words into caption lines (<=32 chars / <=7 words /
-     sentence break) and writes `words` + `captions` back into the manifest
-     in place.
+Per approved short:
+  1. Cut + concat the short's `render_segments` into one audio clip
+     (single source for guest_only/ali_only; both sources amix-ed for stacked,
+     since those are dialogue).
+  2. Run word-level Whisper on the clip (clip-local timings, t=0 at cut start).
+  3. Clean the words VERBATIM — see clean_words().
+  4. Group into caption lines and write `words` + `captions` into the manifest.
 
     python caption/transcribe.py <manifest.json> [--model small.en]
 
-Whisper backend: the LOCAL `whisper` CLI (openai-whisper) resolved from PATH.
-Needs NO API key. `--model` sets the local model name (default small.en).
-Install: `pip install openai-whisper`.
+Whisper backend: the local `whisper` CLI (openai-whisper) on PATH; no API key.
+`--model` sets the model (default small.en). Install: `pip install openai-whisper`.
 """
 
 from __future__ import annotations
@@ -43,26 +32,13 @@ from config import CFG  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parent
 
-# ---------------------------------------------------------------------------
-# VERBATIM caption clean.
-#
-# Captions are VERBATIM — transcribe everything actually said, including
-# dillydallying (filler words, hesitations, false starts, repeated words,
-# "well", "I think", "I'll take a step back"). Do NOT drop or smooth them; the
-# ONLY transforms below are (1) fix obvious mistranscriptions via a small map
-# and (2) capitalize sentence starts. Word timings stay exactly as Whisper
-# produced them. (Folded in from _respoken/build.py + regen_approved02.py.)
-# ---------------------------------------------------------------------------
-
-# Known mistranscription fixes (whole-word, case-insensitive). Punctuation on
-# the token is preserved.
+# Whole-word mistranscription fixes (case-insensitive; punctuation preserved).
 WORD_FIXES = {
     "seeding": "ceding",
-    "supercycle": "supercycle",  # canonical form (handles capitalized too)
+    "supercycle": "supercycle",  # canonical form (also normalizes casing)
 }
 
-# Two-token collapses: when these adjacent lowercased word pairs appear, merge
-# them into the single corrected token (e.g. "super cycle" -> "supercycle").
+# Adjacent-pair merges, e.g. "super cycle" -> "supercycle".
 BIGRAM_FIXES = {
     ("super", "cycle"): "supercycle",
 }
@@ -93,20 +69,18 @@ def _apply_word_fix(word: str) -> str:
 
 
 def clean_words(words: List[Dict]) -> List[Dict]:
-    """words: [{"word","start","end"}, ...] with bare words (no leading space).
+    """Clean Whisper words verbatim: [{"word","start","end"}, ...] in, same out.
 
-    VERBATIM policy: keep every spoken word — filler, hesitations, false
-    starts, repeated words, dillydallying. Do NOT drop leading filler and do
-    NOT collapse immediate stutter duplicates. The only transforms are obvious
-    mistranscription fixes and sentence-start capitalization. Word timings are
-    left exactly as Whisper produced them (no re-zeroing).
+    VERBATIM policy: keep every spoken word — filler, hesitations, false starts,
+    repeats. The only transforms are mistranscription fixes (WORD_FIXES /
+    BIGRAM_FIXES) and sentence-start capitalization. Timings are untouched.
     """
     if not words:
         return []
 
     work = [dict(w) for w in words]
 
-    # 1. bigram mistranscription merges (e.g. "super cycle" -> "supercycle")
+    # 1. bigram merges (e.g. "super cycle" -> "supercycle")
     merged: List[Dict] = []
     i = 0
     while i < len(work):
@@ -130,14 +104,11 @@ def clean_words(words: List[Dict]) -> List[Dict]:
         i += 1
     work = merged
 
-    # 2. single-word mistranscription fixes
+    # 2. single-word fixes
     for w in work:
         w["word"] = _apply_word_fix(w["word"])
 
-    # NOTE: no stutter collapse and no leading-filler drop — captions are
-    # verbatim, so repeated/dillydallying words are kept.
-
-    # 3. capitalize the first word, and the first word after a sentence end.
+    # 3. capitalize the first word and the first word after each sentence end.
     cap_next = True
     for w in work:
         core = w["word"].strip()
@@ -145,7 +116,6 @@ def clean_words(words: List[Dict]) -> List[Dict]:
             w["word"] = core[:1].upper() + core[1:]
         cap_next = core.endswith(SENTENCE_END)
 
-    # 4. emit words verbatim with Whisper's original timings (no re-zeroing).
     out = [{
         "word": w["word"].strip(),
         "start": round(w["start"], 3),
@@ -157,10 +127,8 @@ def clean_words(words: List[Dict]) -> List[Dict]:
 def group_words(words: List[Dict]) -> List[Dict]:
     """Group cleaned words into caption lines.
 
-    Break to a new line when adding the next word would exceed SHORTS_MAX_CHARS
-    chars or SHORTS_MAX_WORDS_PER_LINE words (defaults 32 / 7), or after any word
-    that ends a sentence. Caps are env-driven via config.py. (From
-    gen_manifests.py.)
+    Break before a word that would exceed max_chars or max_words (env-driven,
+    defaults 32 / 7), and after any word that ends a sentence.
     """
     max_chars = CFG.caption.max_chars
     max_words = CFG.caption.max_words_per_line
@@ -191,9 +159,8 @@ def group_words(words: List[Dict]) -> List[Dict]:
 # ---------------------------------------------------------------------------
 
 def _cut_single_audio(src: Path, start: float, end: float, out: Path) -> None:
-    # Pre-input seek (fast). Timings get re-zeroed to the first kept word, and
-    # this mirrors the keyframe-aligned cut render_short.py makes, so the audio
-    # we transcribe matches the audio that ends up in the rendered clip.
+    # Pre-input seek (fast); mirrors render_short.py's cut so transcribed audio
+    # matches what ends up in the rendered clip.
     subprocess.run([
         "ffmpeg", "-y", "-ss", f"{start}", "-to", f"{end}", "-i", str(src),
         "-vn", "-ac", "1", "-ar", "16000",
@@ -259,13 +226,9 @@ def build_clip_audio(short: Dict, sources: Dict, workdir: Path) -> Path:
 def _transcribe_local_cli(audio: Path, model: str) -> List[Dict]:
     """Word-level transcription via the system `whisper` CLI on PATH.
 
-    This deliberately shells out to the `whisper` binary (which carries its own
-    Python) instead of importing whisper in-process, so it does NOT depend on
-    this repo's .venv (which lacks whisper). No API key required.
-
-    Runs the CLI in a TemporaryDirectory, reads the produced JSON
-    (<wav-basename>.json with segments[].words[]) and flattens it to
-    [{"word","start","end"}, ...] with the leading space whisper adds stripped.
+    Shells out to the `whisper` binary (with its own Python) so this doesn't
+    depend on the repo's .venv. Reads the CLI's JSON output and flattens it to
+    [{"word","start","end"}, ...].
     """
     whisper_bin = shutil.which("whisper")
     if not whisper_bin:

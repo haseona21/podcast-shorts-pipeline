@@ -1,28 +1,19 @@
 #!/usr/bin/env python3
-"""Self-contained renderer for the approved shorts.
+"""Render the approved shorts from a manifest.
 
-Reads a manifest JSON (sources + approved shorts), and for each approved short
-produces a finished 1080x1920 vertical clip with burned-in captions.
+For each approved short, produces a finished 1080x1920 vertical clip with
+burned-in captions.
 
     python render_short.py <manifest.json> <output_dir>
 
-Pipeline per short (see module docstring sections):
-  - single layout (guest_only / ali_only): cut the relevant source for each
-    render_segment WITH audio, concat in order, face-track reframe to 9:16,
-    then caption in the default lower-third position.
-  - stacked layout: per render_segment, build a two-up (Ali top / guest bottom,
-    zoomed-out, undistorted) frame, concat in order, then caption with a
-    layout-timeline marking the whole clip "stacked" so captions center on the
-    divider between the two faces.
+Per short:
+  - single (guest_only / ali_only): cut each render_segment with audio, concat,
+    face-track reframe to 9:16, caption in the lower third.
+  - stacked: build a two-up (host top / guest bottom) frame per render_segment,
+    concat, caption with a layout-timeline so captions center on the divider.
 
-Caption styling is owned entirely by caption_video.py (Georgia, cream text,
-deep-red highlight box, no stroke, no shadow). This script only chooses the
-vertical position via the layout timeline.
-
-Dependency-light: stdlib + ffmpeg/ffprobe + the repo's splice/ (cut/stack +
-reframe) and caption/ (burn) modules. The cut/stack/concat ffmpeg logic lives in
-splice/stack.py; reframe and caption run via subprocess against the active
-interpreter.
+Styling lives in caption/burn.py; this script only picks the vertical position
+via the layout timeline. Deps: stdlib + ffmpeg/ffprobe + splice/ and caption/.
 """
 
 from __future__ import annotations

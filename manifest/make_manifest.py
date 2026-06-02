@@ -1,31 +1,24 @@
 #!/usr/bin/env python3
-"""Parse a draft-shorts doc into a render manifest.
+"""Parse a draft-shorts doc into a render manifest JSON.
 
-Reads a "draft-shorts" markdown doc (the kind produced for an episode's shorts
-plan) and emits ONE manifest JSON describing every approved short: its sources,
-layout, render segments, and slug/title. The `words` and `captions` fields are
-left empty — they are filled in by `transcribe_captions.py`, which transcribes
-the actual cut audio.
+Emits one manifest entry per `### Approved N: <Title>` section (other headers,
+e.g. `### Candidate`, are skipped) with its sources, layout, render segments,
+and slug. `words`/`captions` are left empty for caption/transcribe.py to fill.
 
     python manifest/make_manifest.py <draft_shorts.md> \\
         --guest <guest_video.mp4> [--ali <ali_video.mp4>] [--out manifest.json]
 
-Doc structure parsed (the per-episode shorts plan):
+Section format:
 
     ### Approved N: <Title>
-    ...
-    Render segment: `MM:SS.mmm to MM:SS.mmm`           # single segment
+    Render segment: `MM:SS.mmm to MM:SS.mmm`     # single
       -- or --
     Render segments:
-    - `MM:SS.mmm to MM:SS.mmm` -- note...              # multi-segment list
-    - `MM:SS.mmm to MM:SS.mmm` -- note...
-    ...
-    Visual plan: `<guest>-only throughout` / `Both faces` / `... stacked ...`
+    - `MM:SS.mmm to MM:SS.mmm` -- note           # list
+    Visual plan: `guest-only` / `Both faces` / `... stacked ...`
 
-Only `### Approved N: ...` sections are emitted (e.g. `### Candidate 2:` is
-skipped). Layout is derived from the Visual plan line:
-  - "<guest>-only" / "... only ..."                 -> guest_only
-  - "Both faces" / "stacked"                        -> stacked
+Layout from the Visual plan line: "... only ..." -> guest_only;
+"Both faces" / "stacked" / "split" -> stacked.
 """
 
 from __future__ import annotations
@@ -37,11 +30,9 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Optional
 
-# e.g. `### Approved 4: <Title>`
 APPROVED_HEADER_RE = re.compile(r"^###\s+Approved\s+(\d+)\s*:\s*(.+?)\s*$")
-# any `### ...` header (used as a section boundary)
-ANY_H3_RE = re.compile(r"^###\s+")
-# `MM:SS.mmm to MM:SS.mmm`  (also accepts H:MM:SS and integer seconds)
+ANY_H3_RE = re.compile(r"^###\s+")  # section boundary
+# `MM:SS.mmm to MM:SS.mmm` (also accepts H:MM:SS and integer seconds)
 RANGE_RE = re.compile(
     r"`?\s*(\d{1,2}:\d{2}(?::\d{2})?(?:\.\d+)?)\s+to\s+"
     r"(\d{1,2}:\d{2}(?::\d{2})?(?:\.\d+)?)\s*`?"
@@ -73,8 +64,7 @@ def derive_layout(visual_plan: str) -> str:
         return "stacked"
     if "only" in vp:
         return "guest_only"
-    # Default to the simplest single-pane treatment.
-    return "guest_only"
+    return "guest_only"  # default: simplest single-pane
 
 
 def parse_section(lines: List[str]) -> Dict:
@@ -87,14 +77,13 @@ def parse_section(lines: List[str]) -> Dict:
         line = raw.rstrip("\n")
         low = line.strip().lower()
 
-        # Visual plan line.
         if low.startswith("visual plan"):
             after = line.split(":", 1)[1] if ":" in line else ""
             visual_plan = after.strip().strip("`").strip()
             in_segments_list = False
             continue
 
-        # "Render segment:" (single, inline) or "Render segments:" (list follows).
+        # "Render segment:" (inline range) or "Render segments:" (list follows).
         if low.startswith("render segment"):
             inline = RANGE_RE.search(line)
             if inline:
@@ -104,11 +93,9 @@ def parse_section(lines: List[str]) -> Dict:
                 })
                 in_segments_list = False
             else:
-                # header for a following bulleted list of ranges
                 in_segments_list = True
             continue
 
-        # Bulleted ranges following a "Render segments:" header.
         if in_segments_list:
             if line.strip().startswith(("-", "*")):
                 m = RANGE_RE.search(line)
