@@ -25,7 +25,7 @@ from typing import List
 # Make the repo root importable so `config` resolves no matter the CWD.
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from config import CFG  # noqa: E402
+from config import CFG, SEEK_PREROLL  # noqa: E402
 
 _R = CFG.render
 
@@ -69,22 +69,37 @@ def concat(parts: List[Path], out: Path, workdir: Path) -> None:
 
 
 def cut_single(src: Path, start: float, end: float, out: Path) -> None:
-    """Cut [start, end) from a single source WITH audio (sample-accurate)."""
+    """Cut [start, end) from a single source WITH audio (frame-accurate).
+
+    Two-stage seek: fast keyframe seek to SEEK_PREROLL before start (input -ss),
+    then decode-then-seek the remainder (output -ss/-to) for an exact start
+    without decoding the whole preceding source. Mirrors caption/transcribe.py.
+    """
+    coarse = max(0.0, start - SEEK_PREROLL)
     _run_quiet([
-        "ffmpeg", "-y", "-ss", f"{start}", "-to", f"{end}", "-i", str(src),
+        "ffmpeg", "-y",
+        "-ss", f"{coarse:.3f}", "-i", str(src),
+        "-ss", f"{start - coarse:.3f}", "-to", f"{end - coarse:.3f}",
         "-c:v", "libx264", "-crf", CRF, "-c:a", "aac", "-ar", "48000",
         str(out),
     ])
 
 
 def cut_stacked(ali: Path, guest: Path, start: float, end: float, out: Path) -> None:
-    """Build one stacked (Ali top / guest bottom) segment for [start, end)."""
+    """Build one stacked (Ali top / guest bottom) segment for [start, end).
+
+    Same two-stage seek as cut_single (fast keyframe + exact decode-seek). Both
+    inputs fast-seek to the same coarse point so they stay in sync; the output
+    -ss/-to then trim to the exact window.
+    """
+    coarse = max(0.0, start - SEEK_PREROLL)
     _run_quiet([
         "ffmpeg", "-y",
-        "-ss", f"{start}", "-to", f"{end}", "-i", str(ali),
-        "-ss", f"{start}", "-to", f"{end}", "-i", str(guest),
+        "-ss", f"{coarse:.3f}", "-i", str(ali),
+        "-ss", f"{coarse:.3f}", "-i", str(guest),
         "-filter_complex", STACKED_FILTER,
         "-map", "[v]", "-map", "[a]",
+        "-ss", f"{start - coarse:.3f}", "-to", f"{end - coarse:.3f}",
         "-c:v", "libx264", "-crf", CRF, "-c:a", "aac", "-ar", "48000",
         str(out),
     ])

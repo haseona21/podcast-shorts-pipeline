@@ -19,9 +19,37 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent
 DEFAULT_ENV_PATH = REPO_ROOT / ".env"
 
-# Bundled SIL OFL serif (EB Garamond), so captions work out-of-the-box on any
-# OS. Override with SHORTS_FONT. See fonts/README.md.
-DEFAULT_FONT = "fonts/EBGaramond-Regular.ttf"
+# Default caption serif. Prefer Georgia (the house-style bakeoff font) when it's
+# present as a system font; otherwise fall back to the bundled SIL OFL EB Garamond
+# so captions still work on any OS. Override with SHORTS_FONT. See fonts/README.md.
+_GEORGIA = "/System/Library/Fonts/Supplemental/Georgia.ttf"
+_BUNDLED_SERIF = "fonts/EBGaramond-Regular.ttf"
+DEFAULT_FONT = _GEORGIA if Path(_GEORGIA).exists() else _BUNDLED_SERIF
+
+# Named output-format presets: (width, height). Pick one with SHORTS_FORMAT;
+# individual SHORTS_WIDTH / SHORTS_HEIGHT still override the preset. The reframe
+# crop and the stacked panes derive from these dims, so all four shapes render
+# correctly. 16:9 yields a full-width crop (= original framing, no vertical
+# reframe), so the same code path covers vertical and landscape.
+FORMATS = {
+    "youtube_9x16": (1080, 1920),   # vertical short (default)
+    "linkedin_4x5": (1080, 1350),   # portrait
+    "square_1x1": (1080, 1080),     # square
+    "linkedin_16x9": (1920, 1080),  # landscape
+}
+DEFAULT_FORMAT = "youtube_9x16"
+
+# Caption styles (a base style + per-platform overrides) live as data in
+# styles/styles.json, so a posting spot's look — especially its font — can change
+# without code edits. Selected with SHORTS_PLATFORM; unset = base only.
+STYLES_PATH = REPO_ROOT / "styles" / "styles.json"
+
+# Two-stage clip-seek preroll (seconds). A clip cut fast-seeks to a keyframe this
+# far before the target start, then decode-then-seeks the remainder — frame-exact
+# without decoding the whole preceding source. The render cut (splice/stack.py)
+# and the transcribe cut (caption/transcribe.py) MUST share this value so the
+# transcribed audio stays aligned with the rendered clip.
+SEEK_PREROLL = 10.0
 
 
 # ---------------------------------------------------------------------------
@@ -60,6 +88,40 @@ def load_dotenv(path: Path = DEFAULT_ENV_PATH) -> None:
             val = val[1:-1]
         if key not in os.environ:
             os.environ[key] = val
+
+
+# ---------------------------------------------------------------------------
+# caption styles (base + per-platform overrides, dependency-free)
+# ---------------------------------------------------------------------------
+
+def load_styles(path: Path = STYLES_PATH) -> dict:
+    """Load caption styles from styles/styles.json.
+
+    Returns ``{"base": {...}, "platforms": {name: {...}}}``. A missing or empty
+    file yields empty dicts, so the built-in defaults govern and behavior is
+    unchanged (backward-compatible).
+    """
+    import json
+    if not path.exists():
+        return {"base": {}, "platforms": {}}
+    data = json.loads(path.read_text()) or {}
+    return {
+        "base": data.get("base") or {},
+        "platforms": data.get("platforms") or {},
+    }
+
+
+def resolve_style(platform: str = "") -> dict:
+    """Merge the base style with the selected platform's override (override wins).
+
+    ``platform`` comes from SHORTS_PLATFORM; an empty/unknown platform returns the
+    base style alone. Per-field env vars (SHORTS_<FIELD>) still override this at
+    build time in ``load_config``.
+    """
+    styles = load_styles()
+    base = styles["base"]
+    override = styles["platforms"].get(platform, {}) if platform else {}
+    return {**base, **override}
 
 
 # ---------------------------------------------------------------------------
@@ -158,35 +220,43 @@ def load_config() -> Config:
     """Load .env (if present) then build the typed config from env/defaults."""
     load_dotenv()
 
-    text_color = _get_str("SHORTS_TEXT_COLOR", "#F5EFE0")
+    # Caption style: base <- selected platform override (<- per-field env vars below).
+    style = resolve_style(_get_str("SHORTS_PLATFORM", ""))
+
+    text_color = _get_str("SHORTS_TEXT_COLOR", style.get("text_color", "#F5EFE0"))
     caption = CaptionConfig(
-        font=_get_str("SHORTS_FONT", DEFAULT_FONT),
-        font_size=_get_int("SHORTS_FONT_SIZE", 64),
+        font=_get_str("SHORTS_FONT", style.get("font") or DEFAULT_FONT),
+        font_size=_get_int("SHORTS_FONT_SIZE", int(style.get("font_size", 64))),
         text_color=text_color,
         # stroke defaults to the text color (no dark outline)
-        stroke_color=_get_str("SHORTS_STROKE_COLOR", text_color),
-        stroke_width=_get_int("SHORTS_STROKE_WIDTH", 3),
-        highlight_color=_get_str("SHORTS_HIGHLIGHT_COLOR", "#B11226"),
-        word_gap=_get_float("SHORTS_WORD_GAP", 0.35),
-        position_y=_get_float("SHORTS_POSITION_Y", 0.78),
-        stack_position_y=_get_float("SHORTS_STACK_POSITION_Y", 0.5),
-        shadow_strength=_get_float("SHORTS_SHADOW_STRENGTH", 0.0),
-        shadow_blur=_get_float("SHORTS_SHADOW_BLUR", 0.0),
-        max_words_per_line=_get_int("SHORTS_MAX_WORDS_PER_LINE", 7),
-        max_chars=_get_int("SHORTS_MAX_CHARS", 32),
-        padding=_get_int("SHORTS_PADDING", 80),
-        line_count=_get_int("SHORTS_LINE_COUNT", 1),
-        max_words_per_caption=_get_int("SHORTS_MAX_WORDS_PER_CAPTION", 5),
+        stroke_color=_get_str("SHORTS_STROKE_COLOR", style.get("stroke_color", text_color)),
+        stroke_width=_get_int("SHORTS_STROKE_WIDTH", int(style.get("stroke_width", 3))),
+        highlight_color=_get_str("SHORTS_HIGHLIGHT_COLOR", style.get("highlight_color", "#B11226")),
+        word_gap=_get_float("SHORTS_WORD_GAP", float(style.get("word_gap", 0.35))),
+        position_y=_get_float("SHORTS_POSITION_Y", float(style.get("position_y", 0.78))),
+        stack_position_y=_get_float("SHORTS_STACK_POSITION_Y", float(style.get("stack_position_y", 0.5))),
+        shadow_strength=_get_float("SHORTS_SHADOW_STRENGTH", float(style.get("shadow_strength", 0.0))),
+        shadow_blur=_get_float("SHORTS_SHADOW_BLUR", float(style.get("shadow_blur", 0.0))),
+        max_words_per_line=_get_int("SHORTS_MAX_WORDS_PER_LINE", int(style.get("max_words_per_line", 7))),
+        max_chars=_get_int("SHORTS_MAX_CHARS", int(style.get("max_chars", 32))),
+        padding=_get_int("SHORTS_PADDING", int(style.get("padding", 80))),
+        line_count=_get_int("SHORTS_LINE_COUNT", int(style.get("line_count", 1))),
+        max_words_per_caption=_get_int("SHORTS_MAX_WORDS_PER_CAPTION", int(style.get("max_words_per_caption", 5))),
     )
+    fmt = _get_str("SHORTS_FORMAT", DEFAULT_FORMAT)
+    fmt_w, fmt_h = FORMATS.get(fmt, FORMATS[DEFAULT_FORMAT])
+    width = _get_int("SHORTS_WIDTH", fmt_w)
+    height = _get_int("SHORTS_HEIGHT", fmt_h)
     render = RenderConfig(
-        width=_get_int("SHORTS_WIDTH", 1080),
-        height=_get_int("SHORTS_HEIGHT", 1920),
+        width=width,
+        height=height,
         fps=_get_int("SHORTS_FPS", 24),
         crf=_get_int("SHORTS_CRF", 18),
         stack_crop_w=_get_int("SHORTS_STACK_CROP_W", 1215),
         stack_crop_h=_get_int("SHORTS_STACK_CROP_H", 1080),
-        pane_w=_get_int("SHORTS_PANE_W", 1080),
-        pane_h=_get_int("SHORTS_PANE_H", 960),
+        # stacked panes derive from the output frame: two panes vstack to height
+        pane_w=_get_int("SHORTS_PANE_W", width),
+        pane_h=_get_int("SHORTS_PANE_H", height // 2),
     )
     return Config(caption=caption, render=render)
 

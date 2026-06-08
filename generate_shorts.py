@@ -39,6 +39,12 @@ def main() -> int:
     ap.add_argument("--out", type=Path, required=True, help="Output directory")
     ap.add_argument("--model", default="small.en",
                     help="Local whisper model (when CAPTACITY_USE_LOCAL_WHISPER=1)")
+    ap.add_argument("--no-qa", action="store_true",
+                    help="skip the caption QA stage entirely")
+    ap.add_argument("--no-qa-gate", action="store_true",
+                    help="run caption QA but render even if it flags issues")
+    ap.add_argument("--qa-only", action="store_true",
+                    help="stop after caption QA (don't render)")
     args = ap.parse_args()
 
     if not args.draft_shorts.exists():
@@ -49,15 +55,36 @@ def main() -> int:
     manifest = args.out / "manifest.json"
     py = sys.executable
 
-    step("1/3 make_manifest", [
+    step("1/4 make_manifest", [
         py, str(REPO_ROOT / "manifest" / "make_manifest.py"), str(args.draft_shorts),
         "--guest", args.guest, "--ali", args.ali, "--out", str(manifest),
     ])
-    step("2/3 transcribe_captions", [
+    step("2/4 transcribe_captions", [
         py, str(REPO_ROOT / "caption" / "transcribe.py"), str(manifest),
         "--model", args.model,
     ])
-    step("3/3 render_short", [
+
+    # 3/4 caption QA gate: catch mistranscribed names / low-confidence captions
+    # BEFORE any clip is rendered. Skip with --no-qa; override a failure with
+    # --no-qa-gate; stop here with --qa-only.
+    if not args.no_qa:
+        print("\n########## 3/4 caption_qa ##########")
+        qa_cmd = [py, str(REPO_ROOT / "caption" / "qa.py"), str(manifest)]
+        print("  " + " ".join(qa_cmd))
+        qa_rc = subprocess.run(qa_cmd).returncode
+        if args.qa_only:
+            return qa_rc
+        if qa_rc != 0 and not args.no_qa_gate:
+            print(
+                "\nCaption QA flagged issues (above) — nothing was rendered.\n"
+                "Correct the caption text in the manifest (use the transcript spelling\n"
+                "for names), then run render_short.py on the manifest, or re-run with\n"
+                "--no-qa-gate to render anyway / --no-qa to skip QA.",
+                file=sys.stderr,
+            )
+            return qa_rc
+
+    step("4/4 render_short", [
         py, str(REPO_ROOT / "render_short.py"), str(manifest), str(args.out),
     ])
 
