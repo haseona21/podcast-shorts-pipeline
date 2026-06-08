@@ -1,0 +1,21 @@
+{
+  "__doc__": "Caption styles for the clip pipeline. 'base' is the Outset house style (one-line, cream serif, red active-word highlight); its font defaults to Georgia (EB Garamond fallback on non-macOS). Each platform override layers on top of base, changing ONLY the fields it names — set 'font' (an absolute path or a repo-relative fonts/<x>.ttf) here to give a posting spot its own typeface. Precedence at render time: SHORTS_<FIELD> env var > platform override > base > built-in default. Select a platform with SHORTS_PLATFORM (youtube | linkedin | x | youtube_longform); unset = base only. Format (aspect ratio) is a separate axis: SHORTS_FORMAT.",
+  "base": {
+    "font_size": 64,
+    "text_color": "#F5EFE0",
+    "stroke_width": 3,
+    "highlight_color": "#B11226",
+    "word_gap": 0.35,
+    "position_y": 0.78,
+    "max_words_per_line": 7,
+    "max_chars": 32,
+    "line_count": 1,
+    "max_words_per_caption": 5
+  },
+  "platforms": {
+    "youtube": {},
+    "linkedin": {},
+    "x": {},
+    "youtube_longform": {}
+  }
+}
