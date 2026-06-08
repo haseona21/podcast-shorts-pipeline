@@ -28,7 +28,7 @@ from typing import Dict, List
 
 # Make the repo root importable so `config` resolves no matter the CWD.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from config import CFG  # noqa: E402
+from config import CFG, SEEK_PREROLL  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parent
 
@@ -159,24 +159,29 @@ def group_words(words: List[Dict]) -> List[Dict]:
 # ---------------------------------------------------------------------------
 
 def _cut_single_audio(src: Path, start: float, end: float, out: Path) -> None:
-    # Pre-input seek (fast); mirrors render_short.py's cut so transcribed audio
-    # matches what ends up in the rendered clip.
+    # Two-stage seek (fast keyframe + exact decode-seek); mirrors splice/stack.py's
+    # cut so the transcribed audio matches the rendered clip frame-for-frame.
+    coarse = max(0.0, start - SEEK_PREROLL)
     subprocess.run([
-        "ffmpeg", "-y", "-ss", f"{start}", "-to", f"{end}", "-i", str(src),
+        "ffmpeg", "-y",
+        "-ss", f"{coarse:.3f}", "-i", str(src),
+        "-ss", f"{start - coarse:.3f}", "-to", f"{end - coarse:.3f}",
         "-vn", "-ac", "1", "-ar", "16000",
         "-c:a", "libmp3lame", "-b:a", "96k", str(out),
     ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 def _cut_mixed_audio(ali: Path, guest: Path, start: float, end: float, out: Path) -> None:
-    """Mix both speaker tracks for [start,end) into one mono clip."""
+    """Mix both speaker tracks for [start,end) into one mono clip (frame-accurate)."""
+    coarse = max(0.0, start - SEEK_PREROLL)
     subprocess.run([
         "ffmpeg", "-y",
-        "-ss", f"{start}", "-to", f"{end}", "-i", str(ali),
-        "-ss", f"{start}", "-to", f"{end}", "-i", str(guest),
+        "-ss", f"{coarse:.3f}", "-i", str(ali),
+        "-ss", f"{coarse:.3f}", "-i", str(guest),
         "-filter_complex",
         "[0:a][1:a]amix=inputs=2:duration=longest:normalize=0[a]",
         "-map", "[a]",
+        "-ss", f"{start - coarse:.3f}", "-to", f"{end - coarse:.3f}",
         "-ac", "1", "-ar", "16000",
         "-c:a", "libmp3lame", "-b:a", "96k", str(out),
     ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

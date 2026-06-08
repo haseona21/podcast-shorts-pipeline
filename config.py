@@ -44,6 +44,13 @@ DEFAULT_FORMAT = "youtube_9x16"
 # without code edits. Selected with SHORTS_PLATFORM; unset = base only.
 STYLES_PATH = REPO_ROOT / "styles" / "styles.json"
 
+# Two-stage clip-seek preroll (seconds). A clip cut fast-seeks to a keyframe this
+# far before the target start, then decode-then-seeks the remainder — frame-exact
+# without decoding the whole preceding source. The render cut (splice/stack.py)
+# and the transcribe cut (caption/transcribe.py) MUST share this value so the
+# transcribed audio stays aligned with the rendered clip.
+SEEK_PREROLL = 10.0
+
 
 # ---------------------------------------------------------------------------
 # .env loading (dependency-free)
