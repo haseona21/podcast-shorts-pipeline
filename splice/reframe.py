@@ -31,6 +31,10 @@ import mediapipe as mp  # type: ignore
 from mediapipe.tasks import python as mp_python  # type: ignore
 from mediapipe.tasks.python import vision as mp_vision  # type: ignore
 
+# Make the repo root importable so `config` resolves no matter the CWD.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from config import CFG  # noqa: E402
+
 CHUNK_MAX_SECONDS = 10 * 60
 SAMPLE_FPS = 3.0
 EMA_ALPHA = 0.15
@@ -38,12 +42,13 @@ SCENE_THRESHOLD = 0.4
 MIN_FACE_DETECTION_RATE = 0.10
 CHUNK_SNAP_WINDOW_SECONDS = 30
 
-# Crop width as a fraction of source height.
-# 0.5625 = 9:16 direct crop (fills 1080x1920, tightest zoom, most face)
-# 0.75   = 3:4 crop (810x1080), scaled to 1080x1440, letterboxed → more shoulder
-# 0.80   = 4:5 crop (864x1080), even more body
-# 1.0    = square crop, fullest shoulders/background
-CROP_WIDTH_RATIO = 0.5625
+# Crop width as a fraction of source height == the output aspect (width/height),
+# derived from the configured render size so every format crops to the right
+# shape:
+#   0.5625 = 9:16,  0.80 = 4:5,  1.0 = square,  1.7778 = 16:9 (full-width crop,
+#   i.e. the original landscape framing with no vertical reframe).
+# Change the size via SHORTS_FORMAT or SHORTS_WIDTH/SHORTS_HEIGHT (see config.py).
+CROP_WIDTH_RATIO = CFG.render.width / CFG.render.height
 
 FACE_MODEL_URL = (
     "https://storage.googleapis.com/mediapipe-models/face_detector/"
@@ -217,7 +222,7 @@ def compute_segment_crops(
     is the median of valid detections (robust to speaker flip-flop). If no
     detections in a segment, fall back to center.
     """
-    crop_w = src_h * CROP_WIDTH_RATIO
+    crop_w = min(src_w, src_h * CROP_WIDTH_RATIO)
     max_x = src_w - crop_w
 
     cuts = sorted(set(c for c in scene_cuts if 0 < c < chunk_duration))
@@ -267,7 +272,7 @@ def reframe_chunk(
         ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
         src_w, src_h = probe_dimensions(chunk_raw)
-        crop_w = src_h * CROP_WIDTH_RATIO
+        crop_w = min(src_w, src_h * CROP_WIDTH_RATIO)
         samples = sample_face_centers(chunk_raw)
         rate = detection_rate(samples)
 
@@ -289,13 +294,14 @@ def reframe_chunk(
         seg_files: List[Path] = []
         for i, (seg_start, seg_end, crop_x) in enumerate(segments):
             seg_path = Path(td) / f"seg_{i:04d}.mp4"
-            # Crop around the face, scale to fill 1080x1920.
-            # If CROP_WIDTH_RATIO = 0.5625 (9:16), the crop fills exactly.
-            # If larger (wider crop), scale fills width and letterboxes height.
+            # Crop around the face, scale to fill the configured WIDTHxHEIGHT.
+            # The crop aspect == output aspect (CROP_WIDTH_RATIO), so scale fills
+            # exactly; the pad is a no-op unless the crop was clamped to source
+            # width (then it letterboxes), e.g. a very wide target on a narrow src.
             vf = (
                 f"crop={crop_w:.2f}:{src_h}:{crop_x:.2f}:0,"
-                f"scale=1080:-2,"
-                f"pad=1080:1920:0:(1920-ih)/2:black"
+                f"scale={CFG.render.width}:-2,"
+                f"pad={CFG.render.width}:{CFG.render.height}:0:({CFG.render.height}-ih)/2:black"
             )
             run([
                 "ffmpeg", "-y",

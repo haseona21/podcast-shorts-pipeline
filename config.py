@@ -19,9 +19,25 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent
 DEFAULT_ENV_PATH = REPO_ROOT / ".env"
 
-# Bundled SIL OFL serif (EB Garamond), so captions work out-of-the-box on any
-# OS. Override with SHORTS_FONT. See fonts/README.md.
-DEFAULT_FONT = "fonts/EBGaramond-Regular.ttf"
+# Default caption serif. Prefer Georgia (the house-style bakeoff font) when it's
+# present as a system font; otherwise fall back to the bundled SIL OFL EB Garamond
+# so captions still work on any OS. Override with SHORTS_FONT. See fonts/README.md.
+_GEORGIA = "/System/Library/Fonts/Supplemental/Georgia.ttf"
+_BUNDLED_SERIF = "fonts/EBGaramond-Regular.ttf"
+DEFAULT_FONT = _GEORGIA if Path(_GEORGIA).exists() else _BUNDLED_SERIF
+
+# Named output-format presets: (width, height). Pick one with SHORTS_FORMAT;
+# individual SHORTS_WIDTH / SHORTS_HEIGHT still override the preset. The reframe
+# crop and the stacked panes derive from these dims, so all four shapes render
+# correctly. 16:9 yields a full-width crop (= original framing, no vertical
+# reframe), so the same code path covers vertical and landscape.
+FORMATS = {
+    "youtube_9x16": (1080, 1920),   # vertical short (default)
+    "linkedin_4x5": (1080, 1350),   # portrait
+    "square_1x1": (1080, 1080),     # square
+    "linkedin_16x9": (1920, 1080),  # landscape
+}
+DEFAULT_FORMAT = "youtube_9x16"
 
 
 # ---------------------------------------------------------------------------
@@ -178,15 +194,20 @@ def load_config() -> Config:
         line_count=_get_int("SHORTS_LINE_COUNT", 1),
         max_words_per_caption=_get_int("SHORTS_MAX_WORDS_PER_CAPTION", 5),
     )
+    fmt = _get_str("SHORTS_FORMAT", DEFAULT_FORMAT)
+    fmt_w, fmt_h = FORMATS.get(fmt, FORMATS[DEFAULT_FORMAT])
+    width = _get_int("SHORTS_WIDTH", fmt_w)
+    height = _get_int("SHORTS_HEIGHT", fmt_h)
     render = RenderConfig(
-        width=_get_int("SHORTS_WIDTH", 1080),
-        height=_get_int("SHORTS_HEIGHT", 1920),
+        width=width,
+        height=height,
         fps=_get_int("SHORTS_FPS", 24),
         crf=_get_int("SHORTS_CRF", 18),
         stack_crop_w=_get_int("SHORTS_STACK_CROP_W", 1215),
         stack_crop_h=_get_int("SHORTS_STACK_CROP_H", 1080),
-        pane_w=_get_int("SHORTS_PANE_W", 1080),
-        pane_h=_get_int("SHORTS_PANE_H", 960),
+        # stacked panes derive from the output frame: two panes vstack to height
+        pane_w=_get_int("SHORTS_PANE_W", width),
+        pane_h=_get_int("SHORTS_PANE_H", height // 2),
     )
     return Config(caption=caption, render=render)
 
