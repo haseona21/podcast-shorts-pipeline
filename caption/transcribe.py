@@ -97,6 +97,9 @@ def clean_words(words: List[Dict]) -> List[Dict]:
                     "word": fixed + trail,
                     "start": work[i]["start"],
                     "end": work[i + 1]["end"],
+                    # keep the lower confidence of the merged pair
+                    "probability": min(work[i].get("probability", 1.0),
+                                       work[i + 1].get("probability", 1.0)),
                 })
                 i += 2
                 continue
@@ -120,6 +123,7 @@ def clean_words(words: List[Dict]) -> List[Dict]:
         "word": w["word"].strip(),
         "start": round(w["start"], 3),
         "end": round(w["end"], 3),
+        "probability": round(float(w.get("probability", 1.0)), 3),
     } for w in work]
     return out
 
@@ -268,6 +272,8 @@ def _transcribe_local_cli(audio: Path, model: str) -> List[Dict]:
                 "word": str(w["word"]).strip(),  # whisper prefixes a space
                 "start": float(w["start"]),
                 "end": float(w["end"]),
+                # per-word confidence (0..1); the QA stage flags low values
+                "probability": float(w.get("probability", 1.0)),
             })
     return words
 
@@ -308,8 +314,12 @@ def main() -> int:
         captions = group_words(cleaned)
         short["words"] = cleaned
         short["captions"] = captions
-        excerpt = " ".join(c["text"] for c in captions)
-        short["transcript_excerpt"] = [{"speaker": "clip", "text": excerpt}]
+        # Preserve a human-approved transcript_excerpt from the draft (the gold the
+        # QA stage reconciles names against). Only fall back to the Whisper text
+        # when the draft supplied none.
+        if not short.get("transcript_excerpt"):
+            excerpt = " ".join(c["text"] for c in captions)
+            short["transcript_excerpt"] = [{"speaker": "clip", "text": excerpt}]
         print(f"    {len(raw_words)} raw words -> {len(cleaned)} cleaned, "
               f"{len(captions)} caption lines")
 

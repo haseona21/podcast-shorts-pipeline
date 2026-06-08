@@ -68,14 +68,47 @@ def derive_layout(visual_plan: str) -> str:
 
 
 def parse_section(lines: List[str]) -> Dict:
-    """Pull render segments + visual plan out of one Approved section's lines."""
+    """Pull render segments, visual plan, and transcript excerpt out of one
+    Approved section's lines. The excerpt (the human-approved words) is the gold
+    the caption QA stage reconciles names against."""
     segments: List[Dict] = []
     visual_plan = ""
+    excerpt_parts: List[str] = []
 
     in_segments_list = False
+    in_excerpt = False
+    # labels that end a transcript-excerpt block
+    FIELDS = ("visual plan", "render segment", "render segments", "linkedin caption",
+              "why linkedin", "hashtags", "hook", "title", "caption", "duration",
+              "timestamp", "x caption", "post copy")
+
     for raw in lines:
         line = raw.rstrip("\n")
         low = line.strip().lower()
+
+        # "Transcript excerpt:" — inline text and/or following blockquote/prose.
+        if low.startswith("transcript excerpt"):
+            after = (line.split(":", 1)[1] if ":" in line else "").strip().strip("`")
+            after = after.lstrip(">").strip()
+            if after:
+                excerpt_parts.append(after)
+            in_excerpt = True
+            in_segments_list = False
+            continue
+
+        if in_excerpt:
+            s = line.strip()
+            if s.startswith(">"):
+                excerpt_parts.append(s.lstrip(">").strip())
+                continue
+            if s == "":
+                in_excerpt = False
+                continue
+            if any(low.startswith(p) for p in FIELDS):
+                in_excerpt = False  # fall through; handled as a field below
+            else:
+                excerpt_parts.append(s.strip("`").strip())
+                continue
 
         if low.startswith("visual plan"):
             after = line.split(":", 1)[1] if ":" in line else ""
@@ -110,7 +143,9 @@ def parse_section(lines: List[str]) -> Dict:
             else:
                 in_segments_list = False
 
-    return {"render_segments": segments, "visual_plan": visual_plan}
+    excerpt = " ".join(p for p in excerpt_parts if p).strip()
+    return {"render_segments": segments, "visual_plan": visual_plan,
+            "transcript_excerpt": excerpt}
 
 
 def parse_doc(text: str) -> List[Dict]:
@@ -151,6 +186,7 @@ def parse_doc(text: str) -> List[Dict]:
                 "layout": derive_layout(parsed["visual_plan"]),
                 "visual_plan": parsed["visual_plan"],
                 "render_segments": parsed["render_segments"],
+                "transcript_excerpt": parsed.get("transcript_excerpt", ""),
             })
         i = j
 
@@ -185,6 +221,7 @@ def build_manifest(sections: List[Dict], guest: str, ali: Optional[str]) -> Dict
                 round(duration + 2.5, 1),
             ],
             "render_segments": sec["render_segments"],
+            "transcript_excerpt": sec.get("transcript_excerpt", ""),
             "captions": [],
             "words": [],
             "forbidden_phrases": [],
