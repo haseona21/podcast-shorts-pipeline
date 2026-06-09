@@ -17,8 +17,9 @@ Section format:
     - `MM:SS.mmm to MM:SS.mmm` -- note           # list
     Visual plan: `guest-only` / `Both faces` / `... stacked ...`
 
-Layout from the Visual plan line: "... only ..." -> guest_only;
-"Both faces" / "stacked" / "split" -> stacked.
+Layout from the Visual plan line: "Both faces" / "stacked" / "split" -> stacked
+(checked first, so "Try X-only first; otherwise both" -> stacked); explicit
+"Ali-only" -> ali_only; any other "... only ..." -> guest_only.
 """
 
 from __future__ import annotations
@@ -60,8 +61,13 @@ def parse_timestamp(ts: str) -> float:
 
 def derive_layout(visual_plan: str) -> str:
     vp = visual_plan.lower()
+    # "both"/"stacked"/"split" win first, so "Try X-only first; otherwise both
+    # faces" deterministically renders the safe both-faces fallback.
     if "both" in vp or "stacked" in vp or "split" in vp:
         return "stacked"
+    # Honor an explicit Ali-only plan (don't fold it into guest_only).
+    if "ali-only" in vp or "ali only" in vp:
+        return "ali_only"
     if "only" in vp:
         return "guest_only"
     return "guest_only"  # default: simplest single-pane
