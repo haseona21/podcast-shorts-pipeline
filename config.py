@@ -19,12 +19,11 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent
 DEFAULT_ENV_PATH = REPO_ROOT / ".env"
 
-# Default caption serif. Prefer Georgia (the house-style bakeoff font) when it's
-# present as a system font; otherwise fall back to the bundled SIL OFL EB Garamond
-# so captions still work on any OS. Override with SHORTS_FONT. See fonts/README.md.
-_GEORGIA = "/System/Library/Fonts/Supplemental/Georgia.ttf"
+# Default caption serif: the bundled SIL OFL EB Garamond, the Outset house font.
+# It ships with the repo, so every OS renders the same look. Override with
+# SHORTS_FONT. See fonts/README.md.
 _BUNDLED_SERIF = "fonts/EBGaramond-Regular.ttf"
-DEFAULT_FONT = _GEORGIA if Path(_GEORGIA).exists() else _BUNDLED_SERIF
+DEFAULT_FONT = _BUNDLED_SERIF
 
 # Named output-format presets: (width, height). Pick one with SHORTS_FORMAT;
 # individual SHORTS_WIDTH / SHORTS_HEIGHT still override the preset. The reframe

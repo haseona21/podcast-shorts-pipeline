@@ -16,7 +16,7 @@ def clean_env(monkeypatch):
 
 def test_defaults_exist():
     cfg = config.load_config()
-    assert cfg.caption.font == config.DEFAULT_FONT
+    assert cfg.caption.font == config.DEFAULT_FONT == "fonts/EBGaramond-Regular.ttf"
     assert cfg.caption.font_size == 64
     assert cfg.caption.text_color == "#F5EFE0"
     assert cfg.caption.max_chars == 32
