@@ -112,7 +112,7 @@ never be committed.
   audio (`-c:v libx264 -crf 18 -c:a aac -ar 48000`) from the relevant source
   (`guest_video` for `guest_only`, `ali_video` for `ali_only`), concatenated in
   order, face-tracked-reframed to 9:16 via `splice/reframe.py`, then captioned in
-  the **default lower-third** position (`POSITION_Y_PERCENT 0.78`).
+  the **default lower-third** position (`POSITION_Y_PERCENT 0.71`).
 - **stacked** (two-up, Ali top / guest bottom): each `render_segment` pairs both
   sources at the same timecode. Each 16:9 source is **center-cropped to
   1215x1080 (zoomed-out, undistorted — keeps the speaker on-frame) then scaled
@@ -125,17 +125,23 @@ never be committed.
 
 ### Caption look
 
-`caption/burn.py` owns the styling: serif font, cream `#F5EFE0` text, deep-red
-`#B11226` moving highlight box, stroke = fill (no dark outline), no shadow,
+`caption/burn.py` owns the styling. The default is the Outset house style (the
+"EP16 v2" look): white `#FFFFFF` Georgia Bold at 64px, no stroke, no shadow, a
+bright-red `#F31400` moving highlight box behind the active word with
+anti-aliased rounded corners (radius = 0.28 × box height, `SHORTS_BOX_RADIUS`;
+0 = square), centered at 71% of frame height, at most 3 words on screen,
 `SHORTS_WORD_GAP 0.35`. `render_short.py` only chooses the vertical position
 (lower-third vs divider) via the layout timeline; it never touches the styling.
 
 ### Using your own font
 
-Captions render with the font at `SHORTS_FONT`. The repo bundles
+Captions render with the font at `SHORTS_FONT`, default
+`/System/Library/Fonts/Supplemental/Georgia Bold.ttf` (the macOS system font
+used by the house style). Georgia isn't bundled; if it's missing on a machine,
+the pipeline prints a warning and falls back to the bundled
 [EB Garamond](fonts/EBGaramond-Regular.ttf) (SIL OFL — see
-[`fonts/OFL.txt`](fonts/OFL.txt)) as the cross-platform default, so it works
-out-of-the-box on any OS with no system fonts assumed.
+[`fonts/OFL.txt`](fonts/OFL.txt)), which is also available as an optional
+alternate (`SHORTS_FONT=fonts/EBGaramond-Regular.ttf`).
 
 To use a different font, drop a `.ttf`/`.ttc` into [`fonts/`](fonts/) and point
 `SHORTS_FONT` at it (absolute or repo-relative):
@@ -144,7 +150,7 @@ To use a different font, drop a `.ttf`/`.ttc` into [`fonts/`](fonts/) and point
 SHORTS_FONT=fonts/YourFont.ttf python generate_shorts.py ...
 ```
 
-If the configured font file doesn't exist, the pipeline fails with a clear
+If an explicitly configured font file doesn't exist, the pipeline fails with a clear
 message telling you to fix `SHORTS_FONT`, rather than crashing deep in the
 rendering stack.
 
@@ -202,14 +208,15 @@ A real shell `export` always wins over a value in `.env`. The real `.env` is
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `SHORTS_FONT` | `fonts/EBGaramond-Regular.ttf` | Caption font (.ttf/.ttc; absolute or repo-relative) |
+| `SHORTS_FONT` | `/System/Library/Fonts/Supplemental/Georgia Bold.ttf` | Caption font (.ttf/.ttc; absolute or repo-relative). Falls back to bundled `fonts/EBGaramond-Regular.ttf` with a warning if missing |
 | `SHORTS_FONT_SIZE` | `64` | Caption glyph size (px) |
-| `SHORTS_TEXT_COLOR` | `#F5EFE0` | Cream fill color |
+| `SHORTS_TEXT_COLOR` | `#FFFFFF` | White fill color |
 | `SHORTS_STROKE_COLOR` | = text color | Stroke color (no dark outline) |
-| `SHORTS_STROKE_WIDTH` | `3` | Glyph stroke width (px) |
-| `SHORTS_HIGHLIGHT_COLOR` | `#B11226` | Active-word highlight box color |
+| `SHORTS_STROKE_WIDTH` | `0` | Glyph stroke width (px; 0 = none) |
+| `SHORTS_HIGHLIGHT_COLOR` | `#F31400` | Active-word highlight box color |
+| `SHORTS_BOX_RADIUS` | `0.28` | Highlight-box corner radius as fraction of box height (0 = square) |
 | `SHORTS_WORD_GAP` | `0.35` | Extra inter-word gap (fraction of a space) |
-| `SHORTS_POSITION_Y` | `0.78` | Caption center as fraction of height (lower-third) |
+| `SHORTS_POSITION_Y` | `0.71` | Caption center as fraction of height (lower-third) |
 | `SHORTS_STACK_POSITION_Y` | `0.5` | Caption center for stacked layout |
 | `SHORTS_SHADOW_STRENGTH` | `0` | Drop-shadow strength (0 = none) |
 | `SHORTS_SHADOW_BLUR` | `0` | Drop-shadow blur (0 = none) |
@@ -217,7 +224,7 @@ A real shell `export` always wins over a value in `.env`. The real `.env` is
 | `SHORTS_MAX_CHARS` | `32` | `group_words` max chars per caption line |
 | `SHORTS_PADDING` | `80` | Horizontal text bbox padding (px) |
 | `SHORTS_LINE_COUNT` | `1` | Captacity line_count for fit calc |
-| `SHORTS_MAX_WORDS_PER_CAPTION` | `5` | Max words visible at once (caption/burn.py) |
+| `SHORTS_MAX_WORDS_PER_CAPTION` | `3` | Max words visible at once (caption/burn.py) |
 | `SHORTS_WIDTH` | `1080` | Final frame width |
 | `SHORTS_HEIGHT` | `1920` | Final frame height |
 | `SHORTS_FPS` | `24` | Output frame rate |

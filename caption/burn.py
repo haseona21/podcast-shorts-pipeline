@@ -37,6 +37,8 @@ STROKE_COLOR = _C.stroke_color  # = fill by default, so glyphs have no outline
 # Active word: white glyph on a solid colored box that moves word-by-word.
 HIGHLIGHT_CURRENT_WORD = True
 WORD_HIGHLIGHT_COLOR = _C.highlight_color
+# Highlight-box corner radius as a fraction of box height (0 = square corners).
+BOX_RADIUS = _C.box_radius
 
 LINE_COUNT = _C.line_count
 PADDING = _C.padding
@@ -51,11 +53,37 @@ MAX_WORDS_PER_CAPTION = _C.max_words_per_caption
 SHADOW_STRENGTH = _C.shadow_strength  # 0 = no shadow clip composited
 SHADOW_BLUR = _C.shadow_blur
 
-# Caption block center as a fraction of video height. 0.78 = lower-third (clears
-# the Shorts UI); stack uses 0.5 (between the two faces).
+# Caption block center as a fraction of video height. 0.71 = house default
+# (lower-third, clears the Shorts UI); stack uses 0.5 (between the two faces).
 POSITION_Y_PERCENT = _C.position_y
 STACK_POSITION_Y_PERCENT = _C.stack_position_y
 # ------------------------------------------------------------------------------
+
+
+def make_highlight_box(size, color, radius_frac=BOX_RADIUS):
+    """Solid highlight-box clip with anti-aliased rounded corners.
+
+    ``radius_frac`` is the corner radius as a fraction of the box height
+    (house style 0.28); 0 or less gives a plain square ColorClip.
+    """
+    from moviepy.editor import ColorClip, ImageClip  # type: ignore
+    import numpy as np
+
+    w, h = int(size[0]), int(size[1])
+    if not radius_frac or radius_frac <= 0:
+        return ColorClip(size=(w, h), color=color)
+    r = max(1, int(h * radius_frac))
+    r = min(r, w // 2, h // 2) or 1
+    yy, xx = np.mgrid[0:h, 0:w]
+    # Distance from each pixel to the nearest point of the inner rectangle
+    # (inset by r); pixels within r of it are inside, with a 1px AA ramp.
+    cx = np.clip(xx, r, w - 1 - r)
+    cy = np.clip(yy, r, h - 1 - r)
+    d = np.sqrt((xx - cx) ** 2 + (yy - cy) ** 2)
+    alpha = np.clip(r + 0.5 - d, 0, 1)
+    rgb = np.zeros((h, w, 3), dtype=np.uint8)
+    rgb[:] = color
+    return ImageClip(rgb).set_mask(ImageClip(alpha, ismask=True))
 
 
 def dedupe_consecutive_words(segments):
@@ -177,6 +205,7 @@ def add_captions_custom(
     break_points=None,
     layout_timeline=None,
     stacked_y_percent=STACK_POSITION_Y_PERCENT,
+    box_radius=BOX_RADIUS,
 ):
     """Forked from captacity.add_captions to control vertical position.
 
@@ -309,7 +338,6 @@ def add_captions_custom(
                 # at sum(getlength(prior)*scale). Added before the text clip.
                 if highlight_current_word and 0 <= line_active_index < len(words):
                     from PIL import ImageFont as _ImageFont
-                    from moviepy.editor import ColorClip as _ColorClip
                     _scale = 3.012  # matches create_composite_text
                     _pf = _ImageFont.truetype(font, font_size // 3)
                     # Same extra inter-word advance the forked layout applies.
@@ -347,8 +375,9 @@ def add_captions_custom(
                     # parse #RRGGBB highlight color to RGB tuple
                     hc = word_highlight_color.lstrip("#")
                     rgb = tuple(int(hc[i:i + 2], 16) for i in (0, 2, 4))
-                    box = _ColorClip(
-                        size=(box_w + pad_x * 2, box_h + pad_y * 2), color=rgb
+                    box = make_highlight_box(
+                        (box_w + pad_x * 2, box_h + pad_y * 2), rgb,
+                        radius_frac=box_radius,
                     )
                     box = box.set_start(cap["start"])
                     box = box.set_duration(cap["end"] - cap["start"])
@@ -420,7 +449,7 @@ def main() -> int:
     parser.add_argument(
         "--layout-timeline", type=Path, default=None,
         help="JSON list of {start, end, layout} — captions in 'stacked' "
-             "segments render at vertical center instead of 78%%.",
+             "segments render at vertical center instead of the default lower-third.",
     )
     args = parser.parse_args()
 
@@ -475,6 +504,7 @@ def main() -> int:
     print(f"Captioning {args.input.name} → {args.output.name}")
     print(f"  font: {resolved_font}  size: {FONT_SIZE}")
     print(f"  y-position: {POSITION_Y_PERCENT*100:.0f}% of height")
+    print(f"  highlight: {WORD_HIGHLIGHT_COLOR}  box radius: {BOX_RADIUS:g}x height")
     print(f"  segments: {len(segments)} ({sum(len(s['words']) for s in segments)} words)")
 
     add_captions_custom(
@@ -497,6 +527,7 @@ def main() -> int:
         print_info=True,
         break_points=break_points,
         layout_timeline=layout_timeline,
+        box_radius=BOX_RADIUS,
     )
     print("Done.")
     return 0

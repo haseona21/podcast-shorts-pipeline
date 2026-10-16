@@ -19,11 +19,14 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent
 DEFAULT_ENV_PATH = REPO_ROOT / ".env"
 
-# Default caption serif: the bundled SIL OFL EB Garamond, the Outset house font.
-# It ships with the repo, so every OS renders the same look. Override with
-# SHORTS_FONT. See fonts/README.md.
-_BUNDLED_SERIF = "fonts/EBGaramond-Regular.ttf"
-DEFAULT_FONT = _BUNDLED_SERIF
+# Default caption font: macOS system Georgia Bold — the Outset house style (the
+# "EP16 v2" look: white Georgia Bold, rounded bright-red active-word box). It is
+# NOT bundled (Georgia isn't freely redistributable), so on a machine without it
+# resolve_font() warns and falls back to the bundled SIL OFL EB Garamond, which
+# also remains available as an optional alternate (SHORTS_FONT=fonts/
+# EBGaramond-Regular.ttf). Override with SHORTS_FONT. See fonts/README.md.
+DEFAULT_FONT = "/System/Library/Fonts/Supplemental/Georgia Bold.ttf"
+BUNDLED_FONT = "fonts/EBGaramond-Regular.ttf"
 
 # Named output-format presets: (width, height). Pick one with SHORTS_FORMAT;
 # individual SHORTS_WIDTH / SHORTS_HEIGHT still override the preset. The reframe
@@ -78,7 +81,7 @@ def load_dotenv(path: Path = DEFAULT_ENV_PATH) -> None:
             continue
         val = val.strip()
         # Strip a trailing inline comment, but keep a '#' that's part of a color
-        # literal like #B11226 — only ' #' (space then hash) is a comment.
+        # literal like #F31400 — only ' #' (space then hash) is a comment.
         if val[:1] not in ("'", '"'):
             hash_at = val.find(" #")
             if hash_at != -1:
@@ -154,20 +157,42 @@ def resolve_font(font: str = "") -> str:
     """Resolve the caption font to an existing .ttf/.ttc path.
 
     Accepts an absolute path or a path relative to the repo root. Falls back to
-    SHORTS_FONT / the bundled default. Raises FileNotFoundError with a friendly
-    message if nothing resolves, so callers don't crash cryptically deep in PIL.
+    SHORTS_FONT / the default (Georgia Bold). If the default system font is
+    missing on this machine, warns and falls back to the bundled EB Garamond
+    rather than crashing. Any other missing font (an explicit SHORTS_FONT or
+    style override) raises FileNotFoundError with a friendly message, so callers
+    don't crash cryptically deep in PIL.
     """
     candidate = font or _get_str("SHORTS_FONT", DEFAULT_FONT)
-    p = Path(candidate)
-    tries = [p] if p.is_absolute() else [p, REPO_ROOT / p]
-    for t in tries:
-        if t.exists():
-            return str(t)
+
+    def _find(c: str) -> str | None:
+        p = Path(c)
+        tries = [p] if p.is_absolute() else [p, REPO_ROOT / p]
+        for t in tries:
+            if t.exists():
+                return str(t)
+        return None
+
+    found = _find(candidate)
+    if found:
+        return found
+    if candidate == DEFAULT_FONT:
+        fallback = _find(BUNDLED_FONT)
+        if fallback:
+            import warnings
+            warnings.warn(
+                f"Default caption font {DEFAULT_FONT!r} not found on this "
+                f"machine; falling back to bundled {BUNDLED_FONT}. Captions "
+                f"will not match the house style exactly. Set SHORTS_FONT to "
+                f"a Georgia Bold .ttf to fix.",
+                RuntimeWarning, stacklevel=2,
+            )
+            return fallback
     raise FileNotFoundError(
         f"Caption font not found: {candidate!r}.\n"
         f"Set SHORTS_FONT to a .ttf/.ttc file, e.g. "
         f"SHORTS_FONT=fonts/YourFont.ttf, or drop a font into the fonts/ "
-        f"directory. A bundled default ({DEFAULT_FONT}) ships with the repo."
+        f"directory. A bundled alternate ({BUNDLED_FONT}) ships with the repo."
     )
 
 
@@ -195,6 +220,9 @@ class CaptionConfig:
     # "max words visible at once" in caption/burn.py (distinct from the
     # group_words per-line cap).
     max_words_per_caption: int
+    # Active-word highlight box corner radius as a fraction of box height
+    # (0 = square corners).
+    box_radius: float
 
 
 @dataclass(frozen=True)
@@ -222,17 +250,17 @@ def load_config() -> Config:
     # Caption style: base <- selected platform override (<- per-field env vars below).
     style = resolve_style(_get_str("SHORTS_PLATFORM", ""))
 
-    text_color = _get_str("SHORTS_TEXT_COLOR", style.get("text_color", "#F5EFE0"))
+    text_color = _get_str("SHORTS_TEXT_COLOR", style.get("text_color", "#FFFFFF"))
     caption = CaptionConfig(
         font=_get_str("SHORTS_FONT", style.get("font") or DEFAULT_FONT),
         font_size=_get_int("SHORTS_FONT_SIZE", int(style.get("font_size", 64))),
         text_color=text_color,
         # stroke defaults to the text color (no dark outline)
         stroke_color=_get_str("SHORTS_STROKE_COLOR", style.get("stroke_color", text_color)),
-        stroke_width=_get_int("SHORTS_STROKE_WIDTH", int(style.get("stroke_width", 3))),
-        highlight_color=_get_str("SHORTS_HIGHLIGHT_COLOR", style.get("highlight_color", "#B11226")),
+        stroke_width=_get_int("SHORTS_STROKE_WIDTH", int(style.get("stroke_width", 0))),
+        highlight_color=_get_str("SHORTS_HIGHLIGHT_COLOR", style.get("highlight_color", "#F31400")),
         word_gap=_get_float("SHORTS_WORD_GAP", float(style.get("word_gap", 0.35))),
-        position_y=_get_float("SHORTS_POSITION_Y", float(style.get("position_y", 0.78))),
+        position_y=_get_float("SHORTS_POSITION_Y", float(style.get("position_y", 0.71))),
         stack_position_y=_get_float("SHORTS_STACK_POSITION_Y", float(style.get("stack_position_y", 0.5))),
         shadow_strength=_get_float("SHORTS_SHADOW_STRENGTH", float(style.get("shadow_strength", 0.0))),
         shadow_blur=_get_float("SHORTS_SHADOW_BLUR", float(style.get("shadow_blur", 0.0))),
@@ -240,7 +268,8 @@ def load_config() -> Config:
         max_chars=_get_int("SHORTS_MAX_CHARS", int(style.get("max_chars", 32))),
         padding=_get_int("SHORTS_PADDING", int(style.get("padding", 80))),
         line_count=_get_int("SHORTS_LINE_COUNT", int(style.get("line_count", 1))),
-        max_words_per_caption=_get_int("SHORTS_MAX_WORDS_PER_CAPTION", int(style.get("max_words_per_caption", 5))),
+        max_words_per_caption=_get_int("SHORTS_MAX_WORDS_PER_CAPTION", int(style.get("max_words_per_caption", 3))),
+        box_radius=_get_float("SHORTS_BOX_RADIUS", float(style.get("box_radius", 0.28))),
     )
     fmt = _get_str("SHORTS_FORMAT", DEFAULT_FORMAT)
     fmt_w, fmt_h = FORMATS.get(fmt, FORMATS[DEFAULT_FORMAT])

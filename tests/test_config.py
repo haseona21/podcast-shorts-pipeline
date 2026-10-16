@@ -16,9 +16,14 @@ def clean_env(monkeypatch):
 
 def test_defaults_exist():
     cfg = config.load_config()
-    assert cfg.caption.font == config.DEFAULT_FONT == "fonts/EBGaramond-Regular.ttf"
+    assert cfg.caption.font == config.DEFAULT_FONT == "/System/Library/Fonts/Supplemental/Georgia Bold.ttf"
     assert cfg.caption.font_size == 64
-    assert cfg.caption.text_color == "#F5EFE0"
+    assert cfg.caption.text_color == "#FFFFFF"
+    assert cfg.caption.stroke_width == 0
+    assert cfg.caption.highlight_color == "#F31400"
+    assert cfg.caption.position_y == 0.71
+    assert cfg.caption.max_words_per_caption == 3
+    assert cfg.caption.box_radius == 0.28
     assert cfg.caption.max_chars == 32
     assert cfg.caption.max_words_per_line == 7
     assert cfg.render.width == 1080
@@ -62,9 +67,9 @@ def test_dotenv_does_not_override_existing_env(monkeypatch, tmp_path):
 
 def test_dotenv_color_hash_not_stripped(tmp_path):
     env = tmp_path / ".env"
-    env.write_text("SHORTS_HIGHLIGHT_COLOR=#B11226  # crimson box\n")
+    env.write_text("SHORTS_HIGHLIGHT_COLOR=#F31400  # red box\n")
     config.load_dotenv(env)
-    assert os.environ["SHORTS_HIGHLIGHT_COLOR"] == "#B11226"
+    assert os.environ["SHORTS_HIGHLIGHT_COLOR"] == "#F31400"
 
 
 def test_dotenv_strips_quotes_and_export(tmp_path):
@@ -92,16 +97,30 @@ def test_empty_env_value_falls_back_to_default(monkeypatch):
 
 # ---- resolve_font ---------------------------------------------------------
 
-def test_resolve_font_default_bundled():
-    # The bundled default ships in the repo and must resolve.
+def test_resolve_font_default_resolves():
+    # Georgia Bold on macOS, else the bundled EB Garamond fallback — never raises.
     path = config.resolve_font()
     assert path.endswith(".ttf")
     assert os.path.exists(path)
 
 
 def test_resolve_font_relative_to_repo_root():
-    path = config.resolve_font(config.DEFAULT_FONT)
+    # The bundled alternate ships in the repo and resolves repo-relative.
+    path = config.resolve_font(config.BUNDLED_FONT)
     assert os.path.exists(path)
+
+
+def test_resolve_font_missing_default_falls_back_with_warning(monkeypatch):
+    monkeypatch.setattr(config, "DEFAULT_FONT", "/nonexistent/Georgia Bold.ttf")
+    with pytest.warns(RuntimeWarning, match="falling back"):
+        path = config.resolve_font()
+    assert path.endswith(config.BUNDLED_FONT)
+    assert os.path.exists(path)
+
+
+def test_box_radius_env_override(monkeypatch):
+    monkeypatch.setenv("SHORTS_BOX_RADIUS", "0")
+    assert config.load_config().caption.box_radius == 0.0
 
 
 def test_resolve_font_missing_raises_friendly_error():

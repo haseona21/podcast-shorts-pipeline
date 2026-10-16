@@ -1,16 +1,18 @@
 {
-  "__doc__": "Caption styles for the clip pipeline. 'base' is the Outset house style (one-line, cream serif, red active-word highlight); its font defaults to the bundled EB Garamond. Each platform override layers on top of base, changing ONLY the fields it names — set 'font' (an absolute path or a repo-relative fonts/<x>.ttf) here to give a posting spot its own typeface. Precedence at render time: SHORTS_<FIELD> env var > platform override > base > built-in default. Select a platform with SHORTS_PLATFORM (youtube | linkedin | x | youtube_longform); unset = base only. Format (aspect ratio) is a separate axis: SHORTS_FORMAT.",
+  "__doc__": "Caption styles for the clip pipeline. 'base' is the Outset house style (the 'EP16 v2' look: one-line white Georgia Bold, no stroke, rounded bright-red #F31400 active-word highlight box with corner radius = 0.28 x box height, at 71% of frame height, max 3 words on screen). Georgia Bold is the macOS system font; if it is missing the pipeline warns and falls back to the bundled EB Garamond (fonts/EBGaramond-Regular.ttf), which also remains an optional alternate. Each platform override layers on top of base, changing ONLY the fields it names — set 'font' (an absolute path or a repo-relative fonts/<x>.ttf) here to give a posting spot its own typeface. Precedence at render time: SHORTS_<FIELD> env var > platform override > base > built-in default. Select a platform with SHORTS_PLATFORM (youtube | linkedin | x | youtube_longform); unset = base only. Format (aspect ratio) is a separate axis: SHORTS_FORMAT.",
   "base": {
+    "font": "/System/Library/Fonts/Supplemental/Georgia Bold.ttf",
     "font_size": 64,
-    "text_color": "#F5EFE0",
-    "stroke_width": 3,
-    "highlight_color": "#B11226",
+    "text_color": "#FFFFFF",
+    "stroke_width": 0,
+    "highlight_color": "#F31400",
+    "box_radius": 0.28,
     "word_gap": 0.35,
-    "position_y": 0.78,
+    "position_y": 0.71,
     "max_words_per_line": 7,
     "max_chars": 32,
     "line_count": 1,
-    "max_words_per_caption": 5
+    "max_words_per_caption": 3
   },
   "platforms": {
     "youtube": {},
